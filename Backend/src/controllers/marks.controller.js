@@ -11,6 +11,7 @@
 import * as supabaseService from "../services/supabase.service.js";
 import { supabase } from "../config/supabase.js";
 import { AppError, asyncHandler } from "../utils/errorHandler.js";
+import { formatPaginatedResponse } from "../utils/pagination.js";
 
 /**
  * POST /marks
@@ -153,30 +154,46 @@ export const updateMarks = asyncHandler(async (req, res) => {
  */
 export const getMyMarks = asyncHandler(async (req, res) => {
   const userId = req.user.id;
+  console.log(`🔍 getMyMarks called for user: ${userId}`);
 
   // Get user role
   const role = await supabaseService.getUserRole(userId);
+  console.log(`   User role: ${role}`);
 
   // Only students can use this endpoint
   if (role !== "student") {
+    console.warn(`   ⛔ Access denied: Role is ${role}, expected 'student'`);
     throw new AppError("Only students can view their own marks", 403);
   }
 
-  // Get student ID by email
+  // Get student ID by email (case-insensitive)
+  const userEmail = req.user.email.trim();
+  console.log(`   Fetching student record for email (ilike): ${userEmail}`);
+
   const { data: studentsData, error: studentError } = await supabase
     .from("students")
-    .select("id")
-    .eq("email", req.user.email)
+    .select("id, email")
+    .ilike("email", userEmail)
     .limit(1);
 
-  if (studentError || !studentsData || studentsData.length === 0) {
+  if (studentError) {
+    console.error(`   ❌ Error fetching student ID:`, studentError);
+    throw new AppError(`Failed to fetch student profile: ${studentError.message}`, 500);
+  }
+
+  if (!studentsData || studentsData.length === 0) {
+    console.warn(`   ⚠️ Student record not found for email: ${req.user.email}`);
     throw new AppError("Student record not found", 404);
   }
 
   const studentId = studentsData[0].id;
+  console.log(`   Found student ID: ${studentId}`);
 
   // Get marks for this student
+  console.log(`   Fetching marks for student ID: ${studentId}`);
   const marks = await supabaseService.getMarksByStudent(studentId);
+
+  console.log(`✅ Fetched ${marks.length} marks for student ${studentId}`);
 
   res.json({
     success: true,
@@ -216,13 +233,17 @@ export const getClassMarks = asyncHandler(async (req, res) => {
     );
   }
 
+  // ... existing code ...
+
+  // ... existing code ...
+
   // Get marks by class
-  const marks = await supabaseService.getMarksByClass(classId);
+  const { page, limit } = req.query;
+  const { data, count } = await supabaseService.getMarksByClass(classId, page, limit);
 
   res.json({
     success: true,
-    data: marks,
-    count: marks.length,
+    ...formatPaginatedResponse(data, count, page, limit),
   });
 });
 

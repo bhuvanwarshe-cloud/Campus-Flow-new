@@ -1,181 +1,252 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { CampusShell } from "@/components/campusflow/CampusShell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { useRealtime } from "@/hooks/useRealtime";
 import api from "@/lib/api";
-import { CheckCircle, Calendar as CalendarIcon, Save } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { Calendar, CheckCircle, Loader2, Save } from "lucide-react";
+
+interface ClassItem { id: string; name: string; }
+interface Student { id: string; name: string; email: string; }
+type AttendanceStatus = "present" | "absent" | "late";
 
 export default function TeacherAttendance() {
     const { profile } = useAuth();
     const { toast } = useToast();
-    const [classes, setClasses] = useState<any[]>([]);
-    const [selectedClassId, setSelectedClassId] = useState<string>("");
-    const [students, setStudents] = useState<any[]>([]);
-    const [attendance, setAttendance] = useState<Record<string, 'present' | 'absent' | 'late'>>({});
+
+    const [classes, setClasses] = useState<ClassItem[]>([]);
+    const [selectedClassId, setSelectedClassId] = useState("");
+    const [students, setStudents] = useState<Student[]>([]);
+    const [attendance, setAttendance] = useState<Record<string, AttendanceStatus>>({});
+    const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
     const [loading, setLoading] = useState(false);
     const [submitting, setSubmitting] = useState(false);
+    const [submitted, setSubmitted] = useState(false);
 
-    // Fetch classes
+    // Fetch teacher's classes
     useEffect(() => {
-        const fetchClasses = async () => {
-            try {
-                const res = await api.get('/api/classes/teacher');
-                setClasses(res.data.data || []);
-            } catch (err) {
-                console.error(err);
-            }
-        };
-        if (profile) fetchClasses();
+        if (!profile) return;
+        api.get("/api/classes/teacher")
+            .then(res => setClasses(res.data.data || []))
+            .catch(err => console.error("Failed to fetch classes:", err));
     }, [profile]);
 
-    // Fetch students for selected class (Mock or Real)
-    // We need an endpoint getClassStudents. Usually /api/classes/:id/students?
-    // I will skip fetching real students for this step unless I make an endpoint.
-    // Actually, I should use `getAttendanceByClassDate` to see if already marked, OR fetching enrollments.
-    // I'll assume fetching enrollments works: /api/enrollments/class/:id ??
-    // Backend has `getEnrollmentsByClass` but no route. But I can add logic.
-
-    // For now, I will Mock the student list for the UI demo as per user request "No mock data" is tricky if endpoints miss.
-    // But wait, "No mock data" in user prompt. 
-    // I must be careful. I should fetch real data. 
-
-    // Let's assume I fetch enrollments. Need to add route GET /api/enrollments/class/:classId in backend.
-    // I'll assume for now I can fetch it. If fails, I'll fix backend.
+    // Fetch students when class changes
+    const fetchStudents = useCallback(async (classId: string) => {
+        if (!classId) return;
+        setLoading(true);
+        setAttendance({});
+        try {
+            const res = await api.get(`/api/teacher/students?classId=${classId}`);
+            const studentList: Student[] = res.data.data || [];
+            setStudents(studentList);
+            // Default all to present
+            const defaults: Record<string, AttendanceStatus> = {};
+            studentList.forEach(s => { defaults[s.id] = "present"; });
+            setAttendance(defaults);
+        } catch (err) {
+            console.error("Failed to fetch students:", err);
+            toast({ title: "Error", description: "Failed to load students.", variant: "destructive" });
+        } finally {
+            setLoading(false);
+        }
+    }, [toast]);
 
     useEffect(() => {
-        if (!selectedClassId) return;
+        if (selectedClassId) fetchStudents(selectedClassId);
+    }, [selectedClassId, fetchStudents]);
 
-        const fetchStudents = async () => {
-            setLoading(true);
-            try {
-                // This endpoint might need to be created in backend if missing
-                // Checking `enrollments.routes.js` might be wise.
-                // Assuming it exists or I use a workaround. 
-                // Actually, let's use a placeholder request.
-                // const res = await api.get(`/api/classes/${selectedClassId}/students`); // Typical pattern
-                // Or enrollments
+    // Realtime: refresh on attendance changes
+    useRealtime({
+        table: "attendance",
+        event: "*",
+        callback: () => {
+            if (selectedClassId) fetchStudents(selectedClassId);
+        },
+    });
 
-                // TEMPORARY: Empty list if no endpoint, handled by UI.
-                setStudents([]);
-            } catch (err) {
-                console.error(err);
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchStudents();
-    }, [selectedClassId]);
-
-    const handleAttendanceChange = (studentId: string, status: 'present' | 'absent' | 'late') => {
+    const setStatus = (studentId: string, status: AttendanceStatus) => {
         setAttendance(prev => ({ ...prev, [studentId]: status }));
     };
 
+    const markAll = (status: AttendanceStatus) => {
+        const updated: Record<string, AttendanceStatus> = {};
+        students.forEach(s => { updated[s.id] = status; });
+        setAttendance(updated);
+    };
+
     const handleSubmit = async () => {
+        if (!selectedClassId) {
+            toast({ title: "Select a class first", variant: "destructive" });
+            return;
+        }
+        if (students.length === 0) {
+            toast({ title: "No students to mark", variant: "destructive" });
+            return;
+        }
+
         setSubmitting(true);
         try {
-            const payload = {
-                classId: selectedClassId,
-                date: new Date().toISOString().split('T')[0],
-                attendance: Object.entries(attendance).map(([studentId, status]) => ({
-                    studentId, status
-                }))
-            };
+            const attendanceArray = students.map(s => ({
+                studentId: s.id,
+                status: attendance[s.id] || "present",
+            }));
 
-            await api.post('/api/attendance', payload);
-            toast({ title: "Attendance Marked", description: "Records saved successfully." });
+            await api.post("/api/teacher/attendance", {
+                classId: selectedClassId,
+                date,
+                attendance: attendanceArray,
+            });
+
+            setSubmitted(true);
+            toast({ title: "✅ Attendance saved!", description: `Recorded for ${students.length} students on ${date}.` });
+            setTimeout(() => setSubmitted(false), 3000);
         } catch (err: any) {
-            toast({ title: "Error", description: err.message || "Failed to save.", variant: "destructive" });
+            toast({ title: "Failed to save", description: err.response?.data?.error?.message || "Unknown error", variant: "destructive" });
         } finally {
             setSubmitting(false);
         }
     };
 
+    const statusBadge = (status: AttendanceStatus) => {
+        if (status === "present") return <Badge className="bg-green-100 text-green-800 hover:bg-green-100">Present</Badge>;
+        if (status === "late") return <Badge className="bg-yellow-100 text-yellow-800 hover:bg-yellow-100">Late</Badge>;
+        return <Badge className="bg-red-100 text-red-800 hover:bg-red-100">Absent</Badge>;
+    };
+
+    const presentCount = Object.values(attendance).filter(s => s === "present").length;
+    const absentCount = Object.values(attendance).filter(s => s === "absent").length;
+    const lateCount = Object.values(attendance).filter(s => s === "late").length;
+
+    const displayName = profile?.firstName ? `${profile.firstName} ${profile.lastName || ""}`.trim() : "Teacher";
+
     return (
-        <CampusShell role="teacher" title="Attendance" user={{ name: profile?.firstName || "", role: "Teacher" }} notifications={[]}>
-            <div className="max-w-4xl space-y-6">
+        <CampusShell role="teacher" title="Attendance" user={{ name: displayName, role: "Teacher" }}>
+            <div className="space-y-6">
+                {/* Controls */}
                 <Card>
                     <CardHeader>
-                        <CardTitle>Mark Daily Attendance</CardTitle>
-                        <CardDescription>Select a class to start marking attendance for today.</CardDescription>
+                        <CardTitle className="flex items-center gap-2"><Calendar className="h-5 w-5" /> Mark Attendance</CardTitle>
+                        <CardDescription>Select a class and date to record attendance.</CardDescription>
                     </CardHeader>
                     <CardContent>
-                        <div className="flex gap-4 items-center">
-                            <Select value={selectedClassId} onValueChange={setSelectedClassId}>
-                                <SelectTrigger className="w-[300px]">
-                                    <SelectValue placeholder="Select Class" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {classes.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                                </SelectContent>
-                            </Select>
-                            <div className="flex items-center gap-2 ml-auto text-sm text-muted-foreground bg-muted px-3 py-1 rounded">
-                                <CalendarIcon className="h-4 w-4" />
-                                {new Date().toLocaleDateString()}
+                        <div className="grid gap-4 md:grid-cols-3">
+                            <div>
+                                <label className="text-sm font-medium mb-1 block">Class</label>
+                                <Select value={selectedClassId} onValueChange={setSelectedClassId}>
+                                    <SelectTrigger><SelectValue placeholder="Select class" /></SelectTrigger>
+                                    <SelectContent>
+                                        {classes.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                                    </SelectContent>
+                                </Select>
                             </div>
+                            <div>
+                                <label className="text-sm font-medium mb-1 block">Date</label>
+                                <input
+                                    type="date"
+                                    value={date}
+                                    onChange={e => setDate(e.target.value)}
+                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                />
+                            </div>
+                            {selectedClassId && students.length > 0 && (
+                                <div>
+                                    <label className="text-sm font-medium mb-1 block">Bulk Actions</label>
+                                    <div className="flex gap-2">
+                                        <Button variant="outline" size="sm" onClick={() => markAll("present")}>All Present</Button>
+                                        <Button variant="outline" size="sm" onClick={() => markAll("absent")}>All Absent</Button>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </CardContent>
                 </Card>
 
+                {/* Summary Stats */}
+                {selectedClassId && students.length > 0 && (
+                    <div className="grid gap-4 md:grid-cols-3">
+                        <Card className="border-green-200 bg-green-50">
+                            <CardContent className="pt-4">
+                                <p className="text-2xl font-bold text-green-700">{presentCount}</p>
+                                <p className="text-sm text-green-600">Present</p>
+                            </CardContent>
+                        </Card>
+                        <Card className="border-yellow-200 bg-yellow-50">
+                            <CardContent className="pt-4">
+                                <p className="text-2xl font-bold text-yellow-700">{lateCount}</p>
+                                <p className="text-sm text-yellow-600">Late</p>
+                            </CardContent>
+                        </Card>
+                        <Card className="border-red-200 bg-red-50">
+                            <CardContent className="pt-4">
+                                <p className="text-2xl font-bold text-red-700">{absentCount}</p>
+                                <p className="text-sm text-red-600">Absent</p>
+                            </CardContent>
+                        </Card>
+                    </div>
+                )}
+
+                {/* Student Table */}
                 {selectedClassId && (
                     <Card>
-                        <CardHeader className="flex flex-row items-center justify-between">
-                            <div>
-                                <CardTitle>Student List</CardTitle>
-                                <CardDescription>Toggle presence. Auto-saves locally.</CardDescription>
-                            </div>
+                        <CardHeader>
+                            <CardTitle>Students</CardTitle>
                         </CardHeader>
                         <CardContent>
-                            {students.length === 0 ? (
-                                <div className="text-center py-8 text-muted-foreground">
-                                    No students found or endpoint missing. (Please implement `GET /api/classes/:id/students`)
-                                </div>
+                            {loading ? (
+                                <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+                            ) : students.length === 0 ? (
+                                <p className="text-center text-muted-foreground py-8">No students enrolled in this class.</p>
                             ) : (
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow>
-                                            <TableHead>Student</TableHead>
-                                            <TableHead>Roll No</TableHead>
-                                            <TableHead className="text-right">Status</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {students.map(student => (
-                                            <TableRow key={student.id}>
-                                                <TableCell>{student.name}</TableCell>
-                                                <TableCell>{student.roll_no}</TableCell>
-                                                <TableCell className="text-right">
-                                                    <div className="flex justify-end gap-2">
-                                                        <Button
-                                                            size="sm"
-                                                            variant={attendance[student.id] === 'present' ? 'default' : 'outline'}
-                                                            className={attendance[student.id] === 'present' ? 'bg-green-600 hover:bg-green-700' : ''}
-                                                            onClick={() => handleAttendanceChange(student.id, 'present')}
-                                                        >P</Button>
-                                                        <Button
-                                                            size="sm"
-                                                            variant={attendance[student.id] === 'absent' ? 'default' : 'outline'}
-                                                            className={attendance[student.id] === 'absent' ? 'bg-red-600 hover:bg-red-700' : ''}
-                                                        // ... logic
-                                                        >A</Button>
-                                                    </div>
-                                                </TableCell>
+                                <>
+                                    <Table>
+                                        <TableHeader>
+                                            <TableRow>
+                                                <TableHead>Student</TableHead>
+                                                <TableHead>Email</TableHead>
+                                                <TableHead>Status</TableHead>
+                                                <TableHead>Actions</TableHead>
                                             </TableRow>
-                                        ))}
-                                    </TableBody>
-                                </Table>
+                                        </TableHeader>
+                                        <TableBody>
+                                            {students.map(student => (
+                                                <TableRow key={student.id}>
+                                                    <TableCell className="font-medium">{student.name}</TableCell>
+                                                    <TableCell className="text-muted-foreground text-sm">{student.email}</TableCell>
+                                                    <TableCell>{statusBadge(attendance[student.id] || "present")}</TableCell>
+                                                    <TableCell>
+                                                        <div className="flex gap-1">
+                                                            {(["present", "late", "absent"] as AttendanceStatus[]).map(s => (
+                                                                <Button
+                                                                    key={s}
+                                                                    size="sm"
+                                                                    variant={attendance[student.id] === s ? "default" : "outline"}
+                                                                    onClick={() => setStatus(student.id, s)}
+                                                                    className="capitalize text-xs"
+                                                                >
+                                                                    {s}
+                                                                </Button>
+                                                            ))}
+                                                        </div>
+                                                    </TableCell>
+                                                </TableRow>
+                                            ))}
+                                        </TableBody>
+                                    </Table>
+                                    <div className="mt-4 flex justify-end">
+                                        <Button onClick={handleSubmit} disabled={submitting}>
+                                            {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : submitted ? <CheckCircle className="h-4 w-4 mr-2 text-green-500" /> : <Save className="h-4 w-4 mr-2" />}
+                                            {submitting ? "Saving..." : submitted ? "Saved!" : "Save Attendance"}
+                                        </Button>
+                                    </div>
+                                </>
                             )}
                         </CardContent>
-                        {students.length > 0 && <div className="p-6 pt-0 flex justify-end">
-                            <Button onClick={handleSubmit} disabled={submitting}>
-                                {submitting ? "Saving..." : <><Save className="mr-2 h-4 w-4" /> Submit Attendance</>}
-                            </Button>
-                        </div>}
                     </Card>
                 )}
             </div>

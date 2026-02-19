@@ -5,10 +5,14 @@
 
 import express from "express";
 import cors from "cors";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
+import morgan from "morgan";
 import { config } from "./config/env.js";
 import { errorHandler } from "./utils/errorHandler.js";
 import authMiddleware from "./middleware/auth.middleware.js";
 import { supabase } from "./config/supabase.js";
+import logger from "./utils/logger.js";
 
 // Import route handlers
 import rolesRoutes from "./routes/roles.routes.js";
@@ -21,6 +25,9 @@ import profileCompletionRoutes from "./routes/profileCompletion.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import attendanceRoutes from "./routes/attendance.routes.js";
 import notificationsRoutes from "./routes/notifications.routes.js";
+import uploadRoutes from "./routes/upload.routes.js";
+import teacherRoutes from "./routes/teacher.routes.js";
+import studentRoutes from "./routes/student.routes.js";
 
 // Initialize Express app
 const app = express();
@@ -30,15 +37,56 @@ const app = express();
 // ============================================
 
 // Enable CORS for frontend communication
+const allowedOrigins = ["http://localhost:3000", "http://localhost:8080", process.env.FRONTEND_URL].filter(Boolean);
 app.use(
   cors({
-    origin: ["http://localhost:3000", "http://localhost:8080", process.env.FRONTEND_URL].filter(Boolean),
+    origin: function (origin, callback) {
+      // Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.indexOf(origin) === -1) {
+        const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+        return callback(new Error(msg), false);
+      }
+      return callback(null, true);
+    },
     credentials: true,
   })
 );
 
+// Set security HTTP headers
+app.use(helmet());
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 200, // limit each IP to 200 requests per windowMs
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  message: {
+    success: false,
+    error: {
+      message: "Too many requests, please try again later.",
+      statusCode: 429
+    }
+  }
+});
+
+// Apply rate limiting to all requests
+app.use(limiter);
+
+// Development logging
+if (config.nodeEnv === "development") {
+  app.use(morgan("dev"));
+} else {
+  // Production logging using Winston stream
+  const stream = {
+    write: (message) => logger.http(message.trim()),
+  };
+  app.use(morgan("combined", { stream }));
+}
+
 // Parse JSON request bodies
-app.use(express.json());
+app.use(express.json({ limit: '10kb' })); // Body limit for security
 
 // Health check endpoint (no auth required)
 app.get("/health", (req, res) => {
@@ -170,6 +218,9 @@ app.use("/api/profile-completion", profileCompletionRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/notifications", notificationsRoutes);
+app.use("/api/upload", uploadRoutes);
+app.use("/api/teacher", teacherRoutes);
+app.use("/api/student", studentRoutes);
 
 // ============================================
 // 404 HANDLER
@@ -198,15 +249,17 @@ app.use(errorHandler);
 const PORT = config.port;
 const NODE_ENV = config.nodeEnv;
 
-app.listen(PORT, () => {
-  console.log("🚀 CampusFlow Backend Server");
-  console.log("================================");
-  console.log(`📡 Server running on port ${PORT}`);
-  console.log(`🌍 Environment: ${NODE_ENV}`);
-  console.log(`📍 Health check: http://localhost:${PORT}/health`);
-  console.log(`📋 API Status: http://localhost:${PORT}/api/status`);
-  console.log("================================");
-  console.log("✅ Backend is ready!");
-});
+if (process.env.NODE_ENV !== "test") {
+  app.listen(PORT, () => {
+    console.log("🚀 CampusFlow Backend Server");
+    console.log("================================");
+    console.log(`📡 Server running on port ${PORT}`);
+    console.log(`🌍 Environment: ${NODE_ENV}`);
+    console.log(`📍 Health check: http://localhost:${PORT}/health`);
+    console.log(`📋 API Status: http://localhost:${PORT}/api/status`);
+    console.log("================================");
+    console.log("✅ Backend is ready!");
+  });
+}
 
 export default app;

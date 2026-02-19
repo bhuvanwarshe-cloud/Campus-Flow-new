@@ -1,4 +1,8 @@
 import { Bell } from "lucide-react";
+import { useState, useEffect } from "react";
+import api from "@/lib/api";
+import { useRealtime } from "@/hooks/useRealtime";
+import { formatDistanceToNow } from "date-fns";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -13,13 +17,56 @@ import { cn } from "@/lib/utils";
 export type CampusNotification = {
   id: string;
   title: string;
-  description: string;
-  timestamp: string;
-  unread?: boolean;
+  message: string;
+  created_at: string;
+  is_read: boolean;
+  type?: 'info' | 'warning' | 'success' | 'error';
+  link?: string;
 };
 
-export function NotificationsDropdown({ notifications }: { notifications: CampusNotification[] }) {
-  const unreadCount = notifications.filter((n) => n.unread).length;
+export function NotificationsDropdown() {
+  const [notifications, setNotifications] = useState<CampusNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const fetchNotifications = async () => {
+    try {
+      const { data } = await api.get("/api/notifications");
+      if (data.success) {
+        setNotifications(data.data);
+        setUnreadCount(data.data.filter((n: any) => !n.is_read).length);
+      }
+    } catch (error) {
+      console.error("Failed to fetch notifications:", error);
+    }
+  };
+
+  useEffect(() => {
+    fetchNotifications();
+  }, []);
+
+  // Real-time listener
+  useRealtime({
+    table: "notifications",
+    event: "*", // Listen for INSERT (new) and UPDATE (read status)
+    callback: () => {
+      fetchNotifications();
+    },
+  });
+
+  const markAsRead = async (id: string, currentStatus: boolean) => {
+    if (currentStatus) return; // Already read
+
+    try {
+      // Optimistic update
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+      setUnreadCount(prev => Math.max(0, prev - 1));
+
+      await api.patch(`/api/notifications/${id}/read`);
+    } catch (error) {
+      console.error("Failed to mark as read:", error);
+      fetchNotifications(); // Revert on error
+    }
+  };
 
   return (
     <DropdownMenu>
@@ -53,17 +100,20 @@ export function NotificationsDropdown({ notifications }: { notifications: Campus
               {notifications.map((n) => (
                 <div
                   key={n.id}
+                  onClick={() => markAsRead(n.id, n.is_read)}
                   className={cn(
-                    "rounded-lg border bg-card p-3 shadow-soft",
-                    n.unread && "border-brand2/30 bg-brand2/5",
+                    "cursor-pointer rounded-lg border bg-card p-3 shadow-soft transition-colors hover:bg-accent",
+                    !n.is_read && "border-brand2/30 bg-brand2/5",
                   )}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">{n.title}</p>
-                      <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{n.description}</p>
+                      <p className={cn("truncate text-sm font-medium", !n.is_read && "font-semibold")}>{n.title}</p>
+                      <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{n.message}</p>
                     </div>
-                    <span className="shrink-0 text-[11px] text-muted-foreground">{n.timestamp}</span>
+                    <span className="shrink-0 text-[11px] text-muted-foreground">
+                      {formatDistanceToNow(new Date(n.created_at), { addSuffix: true })}
+                    </span>
                   </div>
                 </div>
               ))}

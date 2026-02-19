@@ -44,6 +44,7 @@ const adminItems: NavItem[] = [
 
 const teacherItems: NavItem[] = [
   { title: "Dashboard", url: "/teacher", icon: LayoutDashboard },
+  { title: "Students", url: "/teacher/students", icon: UsersRound },
   { title: "My Classes", url: "/teacher/classes", icon: GraduationCap },
   { title: "Attendance", url: "/teacher/attendance", icon: CalendarCheck },
   { title: "Marks", url: "/teacher/marks", icon: Gauge },

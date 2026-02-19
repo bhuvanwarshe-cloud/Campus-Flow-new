@@ -1,12 +1,11 @@
-/**
- * Error Handler Utility
- * Provides consistent error response formatting
- */
+import logger from "./logger.js";
+import { config } from "../config/env.js";
 
 export class AppError extends Error {
   constructor(message, statusCode) {
     super(message);
     this.statusCode = statusCode;
+    this.isOperational = true; // Mark as operational error (trusted)
     Error.captureStackTrace(this, this.constructor);
   }
 }
@@ -26,28 +25,39 @@ export const asyncHandler = (fn) => (req, res, next) => {
  * @returns {Object} Formatted error response
  */
 export const formatErrorResponse = (err) => {
-  return {
+  const response = {
     success: false,
     error: {
-      message: err.message,
+      message: err.message || "Internal Server Error",
       statusCode: err.statusCode || 500,
     },
   };
+
+  // Only include stack trace in development
+  if (config.nodeEnv === "development") {
+    response.error.stack = err.stack;
+  }
+
+  return response;
 };
 
 /**
  * Handle errors in Express middleware
  * Should be the last middleware in the app
  */
+// eslint-disable-next-line no-unused-vars
 export const errorHandler = (err, req, res, next) => {
-  console.error("\n❌ ERROR CAUGHT BY ERROR HANDLER");
-  console.error("   Message:", err.message);
-  console.error("   Status:", err.statusCode || 500);
-  console.error("   Stack:", err.stack);
-  console.error("   Full Error:", err);
-
   const statusCode = err.statusCode || 500;
   const message = err.message || "Internal Server Error";
+
+  // Log error using Winston
+  logger.error(
+    `${statusCode} - ${message} - ${req.originalUrl} - ${req.method} - ${req.ip}`
+  );
+
+  if (config.nodeEnv === "development") {
+    logger.debug(err.stack);
+  }
 
   // Make sure we're sending JSON, not HTML
   res.status(statusCode).json(formatErrorResponse(err));

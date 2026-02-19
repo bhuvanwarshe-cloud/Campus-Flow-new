@@ -5,6 +5,7 @@
 
 import * as supabaseService from "../services/supabase.service.js";
 import { AppError, asyncHandler } from "../utils/errorHandler.js";
+import { formatPaginatedResponse } from "../utils/pagination.js";
 
 /**
  * POST /enrollments
@@ -46,22 +47,24 @@ export const createEnrollment = asyncHandler(async (req, res) => {
   });
 });
 
+
+
 /**
  * GET /enrollments/class/:classId
  * Get all enrollments for a specific class
  */
 export const getEnrollmentsByClass = asyncHandler(async (req, res) => {
   const { classId } = req.params;
+  const { page, limit } = req.query;
 
   // Verify class exists
   await supabaseService.getClassById(classId);
 
-  const enrollments = await supabaseService.getEnrollmentsByClass(classId);
+  const { data, count } = await supabaseService.getEnrollmentsByClass(classId, page, limit);
 
   res.json({
     success: true,
-    data: enrollments,
-    count: enrollments.length,
+    ...formatPaginatedResponse(data, count, page, limit),
   });
 });
 

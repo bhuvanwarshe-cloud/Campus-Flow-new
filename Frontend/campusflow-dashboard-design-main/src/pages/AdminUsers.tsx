@@ -62,7 +62,6 @@ export default function AdminUsers() {
         <CampusShell
             role="admin"
             title="User Management"
-            notifications={[]}
             user={{ name: "Administrator", role: "Admin" }}
         >
             <div className="space-y-6">

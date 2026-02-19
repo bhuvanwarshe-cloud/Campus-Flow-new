@@ -31,28 +31,7 @@ const deptPerformance = [
   { dept: "Science", score: 82 },
 ];
 
-const notifications = [
-  {
-    id: "n1",
-    title: "AI flagged 6 at-risk students",
-    description: "Attendance decline detected across two cohorts.",
-    timestamp: "2h",
-    unread: true,
-  },
-  {
-    id: "n2",
-    title: "New course created",
-    description: "CS-214: Data Structures has been added.",
-    timestamp: "1d",
-  },
-  {
-    id: "n3",
-    title: "Teacher onboarding pending",
-    description: "3 teacher accounts require approval.",
-    timestamp: "2d",
-    unread: true,
-  },
-];
+
 
 export default function AdminDashboard() {
   const { profile } = useAuth();
@@ -65,7 +44,6 @@ export default function AdminDashboard() {
     <CampusShell
       role="admin"
       title={`Welcome back, ${profile?.firstName || 'Admin'} 👋`}
-      notifications={notifications}
       user={{ name: displayName, role: "Admin" }}
     >
       <div className="grid gap-6">

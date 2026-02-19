@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Supabase Service Layer
  * Centralized database operations with consistent error handling
  */
@@ -1223,14 +1223,24 @@ export const deleteProfilePhoto = async (userId) => {
  * @returns {Promise<Object>} Created attendance
  */
 export const createAttendance = async (attendanceData) => {
+  const records = Array.isArray(attendanceData) ? attendanceData : [attendanceData];
+
   const { data, error } = await supabase
     .from("attendance")
-    .upsert(Array.isArray(attendanceData) ? attendanceData : [attendanceData]) // Support bulk upsert
+    .upsert(records, {
+      onConflict: "class_id,student_id,date",  // match the UNIQUE constraint
+      ignoreDuplicates: false,                  // update status on re-submission
+    })
     .select();
 
   if (error) {
-    console.error("❌ Error creating attendance:", error);
-    throw new AppError("Failed to record attendance", 500);
+    console.error("❌ createAttendance error:", {
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+    });
+    throw new AppError(`Failed to record attendance: ${error.message}`, 500);
   }
 
   return data;
@@ -1311,6 +1321,304 @@ export const getNotifications = async (filters = {}) => {
 
 
 
+// ============================================
+// ANNOUNCEMENTS
+// ============================================
+
+export const createAnnouncement = async (announcementData) => {
+  const { data, error } = await supabase
+    .from("announcements")
+    .insert([announcementData])
+    .select()
+    .single();
+  if (error) {
+    console.error(" Error creating announcement:", error);
+    throw new AppError(`Failed to create announcement: ${error.message}`, 500);
+  }
+  return data;
+};
+
+export const getAnnouncementsByClass = async (classId) => {
+  const { data, error } = await supabase
+    .from("announcements")
+    .select("id, title, body, created_at, created_by")
+    .eq("class_id", classId)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false });
+  if (error) {
+    if (error.code === "42P01") return [];
+    throw new AppError(`Failed to fetch announcements: ${error.message}`, 500);
+  }
+  return data || [];
+};
+
+export const getStudentAnnouncements = async (studentId) => {
+  const { data: enrollments, error: enrollError } = await supabase
+    .from("enrollments")
+    .select("class_id")
+    .eq("student_id", studentId);
+  if (enrollError) {
+    if (enrollError.code === "42P01") return [];
+    throw new AppError(`Failed to fetch enrollments: ${enrollError.message}`, 500);
+  }
+  if (!enrollments || enrollments.length === 0) return [];
+  const classIds = enrollments.map((e) => e.class_id);
+  const { data, error } = await supabase
+    .from("announcements")
+    .select("id, title, body, created_at, class_id, classes(name)")
+    .in("class_id", classIds)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (error) {
+    if (error.code === "42P01") return [];
+    throw new AppError(`Failed to fetch announcements: ${error.message}`, 500);
+  }
+  return data || [];
+};
+
+// ============================================
+// PERFORMANCE REPORTS
+// ============================================
+
+export const createPerformanceReport = async (reportData) => {
+  const { data, error } = await supabase
+    .from("performance_reports")
+    .upsert([reportData], { onConflict: "student_id,class_id,period" })
+    .select()
+    .single();
+  if (error) {
+    console.error("❌ Error creating performance report:", error);
+    throw new AppError(`Failed to create performance report: ${error.message}`, 500);
+  }
+  return data;
+};
+
+export const getPerformanceByStudent = async (studentId) => {
+  const { data, error } = await supabase
+    .from("performance_reports")
+    .select("id, period, avg_marks, attendance_pct, total_exams, total_present, total_absent, remarks, created_at, class:classes(name)")
+    .eq("student_id", studentId)
+    .order("created_at", { ascending: false });
+  if (error) {
+    if (error.code === "42P01") return [];
+    throw new AppError(`Failed to fetch performance reports: ${error.message}`, 500);
+  }
+  return data || [];
+};
+
+// ============================================
+// TEACHER-STUDENT QUERIES
+// ============================================
+
+export const getStudentsByTeacher = async (
+  teacherId,
+  page = 1,
+  limit = 20,
+  search = "",
+  classId = null,
+  sortBy = "name",
+  sortOrder = "asc"
+) => {
+  // ── Step 1: Get class IDs for this teacher ───────────────────────────────
+  let assignQuery = supabase
+    .from("teacher_classes")
+    .select("class_id")
+    .eq("teacher_id", teacherId);
+  if (classId) assignQuery = assignQuery.eq("class_id", classId);
+
+  const { data: assignments, error: assignError } = await assignQuery;
+  if (assignError) {
+    if (assignError.code === "42P01") return { data: [], count: 0 };
+    console.error("❌ teacher_classes fetch error:", assignError.message);
+    throw new AppError(`Failed to fetch teacher classes: ${assignError.message}`, 500);
+  }
+
+  console.log(`[getStudentsByTeacher] teacherId=${teacherId} → ${assignments?.length ?? 0} class assignments`);
+
+  let classIds;
+  if (!assignments || assignments.length === 0) {
+    // Fallback: teacher may not be in teacher_classes — check classes.created_by
+    let createdQuery = supabase.from("classes").select("id").eq("created_by", teacherId);
+    if (classId) createdQuery = createdQuery.eq("id", classId);
+    const { data: createdClasses } = await createdQuery;
+    console.log(`[getStudentsByTeacher] fallback created_by → ${createdClasses?.length ?? 0} classes`);
+    if (!createdClasses || createdClasses.length === 0) return { data: [], count: 0 };
+    classIds = createdClasses.map((c) => c.id);
+  } else {
+    classIds = assignments.map((a) => a.class_id);
+  }
+
+  // ── Step 2: Fetch class names separately (safe — no join alias) ──────────
+  const { data: classRows } = await supabase
+    .from("classes")
+    .select("id, name")
+    .in("id", classIds);
+  const classNameMap = {};
+  (classRows || []).forEach((c) => { classNameMap[c.id] = c.name; });
+
+  // ── Step 3: Get enrollments for those classes ────────────────────────────
+  const { data: enrollments, error: enrollError } = await supabase
+    .from("enrollments")
+    .select("student_id, class_id")
+    .in("class_id", classIds);
+  if (enrollError) {
+    if (enrollError.code === "42P01") return { data: [], count: 0 };
+    throw new AppError(`Failed to fetch enrollments: ${enrollError.message}`, 500);
+  }
+
+  console.log(`[getStudentsByTeacher] ${enrollments?.length ?? 0} enrollments found`);
+  if (!enrollments || enrollments.length === 0) return { data: [], count: 0 };
+
+  const studentIds = [...new Set(enrollments.map((e) => e.student_id))];
+  // Map: studentId → first class they're enrolled in
+  const studentClassMap = {};
+  enrollments.forEach((e) => {
+    if (!studentClassMap[e.student_id]) studentClassMap[e.student_id] = e.class_id;
+  });
+
+  // ── Step 4: Fetch paginated students ────────────────────────────────────
+  const from = (page - 1) * limit;
+  const to = from + limit - 1;
+  const allowedSort = ["name", "email", "created_at"];
+  const safeSort = allowedSort.includes(sortBy) ? sortBy : "name";
+  const ascending = sortOrder !== "desc";
+
+  let query = supabase
+    .from("students")
+    .select("id, name, email, roll_no, created_at", { count: "exact" })
+    .in("id", studentIds)
+    .order(safeSort, { ascending })
+    .range(from, to);
+
+  // Search by name or email only (roll_no may be smallint — skip ilike on it)
+  if (search) {
+    query = query.or(`name.ilike.%${search}%,email.ilike.%${search}%`);
+  }
+
+  const { data: students, error: studentError, count } = await query;
+  if (studentError) {
+    throw new AppError(`Failed to fetch students: ${studentError.message}`, 500);
+  }
+
+  console.log(`[getStudentsByTeacher] ${students?.length ?? 0} students returned (total: ${count})`);
+  if (!students || students.length === 0) return { data: [], count: 0 };
+
+  // ── Step 5: Enrich with attendance % and avg marks ───────────────────────
+  const enrichedStudents = await Promise.all(
+    students.map(async (s) => {
+      const sClassId = studentClassMap[s.id];
+
+      let attendancePct = null;
+      try {
+        const { data: attRows } = await supabase
+          .from("attendance")
+          .select("status")
+          .eq("student_id", s.id)
+          .eq("class_id", sClassId);
+        if (attRows && attRows.length > 0) {
+          const presentCount = attRows.filter(
+            (r) => r.status === "present" || r.status === "late"
+          ).length;
+          attendancePct = Math.round((presentCount / attRows.length) * 100);
+        }
+      } catch (_) { /* non-fatal */ }
+
+      let avgMarks = null;
+      try {
+        const { data: markRows } = await supabase
+          .from("marks")
+          .select("marks_obtained")
+          .eq("student_id", s.id);
+        if (markRows && markRows.length > 0) {
+          const total = markRows.reduce((sum, m) => sum + (m.marks_obtained || 0), 0);
+          avgMarks = Math.round((total / markRows.length) * 10) / 10;
+        }
+      } catch (_) { /* non-fatal */ }
+
+      return {
+        id: s.id,
+        name: s.name,
+        email: s.email,
+        roll_no: s.roll_no != null ? String(s.roll_no) : "—",
+        class: classNameMap[sClassId] || "Unknown",
+        class_id: sClassId,
+        attendance_pct: attendancePct,
+        avg_marks: avgMarks,
+      };
+    })
+  );
+
+  return { data: enrichedStudents, count: count || 0 };
+};
+
+// ============================================
+// STUDENT ATTENDANCE
+
+// ============================================
+
+export const getStudentAttendance = async (studentId) => {
+  const { data, error } = await supabase
+    .from("attendance")
+    .select("id, date, status, class_id")
+    .eq("student_id", studentId)
+    .order("date", { ascending: false })
+    .limit(100);
+  if (error) {
+    if (error.code === "42P01") return [];
+    console.error("❌ getStudentAttendance error:", error);
+    throw new AppError(`Failed to fetch attendance: ${error.message}`, 500);
+  }
+  return data || [];
+};
+
+// ============================================
+// SUBJECTS & EXAMS (class-filtered variants)
+// ============================================
+
+export const getSubjectsByClass = async (classId) => {
+  const { data, error } = await supabase
+    .from("subjects")
+    .select("id, name, created_at")
+    .eq("class_id", classId)
+    .order("name");
+  if (error) {
+    if (error.code === "42P01") return [];
+    throw new AppError(`Failed to fetch subjects: ${error.message}`, 500);
+  }
+  return data || [];
+};
+
+export const getExamsByClass = async (classId) => {
+  const { data, error } = await supabase
+    .from("exams")
+    .select("id, name, max_marks, created_at")
+    .eq("class_id", classId)
+    .order("created_at", { ascending: false });
+  if (error) {
+    if (error.code === "42P01") return [];
+    throw new AppError(`Failed to fetch exams: ${error.message}`, 500);
+  }
+  return data || [];
+};
+
+// ============================================
+// MARKS UPLOAD (bulk)
+// ============================================
+
+export const uploadMarks = async (marksArray) => {
+  const { data, error } = await supabase
+    .from("marks")
+    .upsert(marksArray, { onConflict: "student_id,exam_id,subject_id" })
+    .select();
+  if (error) {
+    console.error(" Error uploading marks:", error);
+    throw new AppError(`Failed to upload marks: ${error.message}`, 500);
+  }
+  return data || [];
+};
+
+
 export default {
   getUserRole,
   getUserProfile,
@@ -1360,4 +1668,20 @@ export default {
   getNotifications,
   getAllStudents,
   getAllTeachers,
+  // New: Announcements
+  createAnnouncement,
+  getAnnouncementsByClass,
+  getStudentAnnouncements,
+  // New: Performance Reports
+  createPerformanceReport,
+  getPerformanceByStudent,
+  // New: Teacher-Student Queries
+  getStudentsByTeacher,
+  // New: Student Attendance
+  getStudentAttendance,
+  // New: Subjects & Exams (class-filtered)
+  getSubjectsByClass,
+  getExamsByClass,
+  // New: Marks upload
+  uploadMarks,
 };

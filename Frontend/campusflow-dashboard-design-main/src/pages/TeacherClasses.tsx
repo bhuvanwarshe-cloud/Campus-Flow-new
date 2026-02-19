@@ -47,7 +47,6 @@ export default function TeacherClasses() {
             <CampusShell
                 role="teacher"
                 title="My Classes"
-                notifications={[]}
                 user={{ name: `${profile?.firstName} ${profile?.lastName}`, role: "Teacher" }}
             >
                 <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -71,7 +70,6 @@ export default function TeacherClasses() {
         <CampusShell
             role="teacher"
             title="My Classes"
-            notifications={[]}
             user={{ name: `${profile?.firstName} ${profile?.lastName}`, role: "Teacher" }}
         >
             <div className="space-y-6">

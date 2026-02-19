@@ -6,7 +6,12 @@
 import express from "express";
 import * as marksController from "../controllers/marks.controller.js";
 
+import { authMiddleware } from "../middleware/auth.middleware.js";
+
 const router = express.Router();
+
+// Protect all routes
+router.use(authMiddleware);
 
 // POST /marks - Upload marks (teacher only)
 router.post("/", marksController.uploadMarks);

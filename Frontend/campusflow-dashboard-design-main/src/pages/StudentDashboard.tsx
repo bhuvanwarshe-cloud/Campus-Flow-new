@@ -1,142 +1,277 @@
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { CampusShell } from "@/components/campusflow/CampusShell";
 import { StatCard } from "@/components/campusflow/StatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
+import { useState, useEffect, useCallback } from "react";
+import api from "@/lib/api";
+import { useRealtime } from "@/hooks/useRealtime";
+import { toast } from "sonner";
+import { Megaphone, Loader2, Clock } from "lucide-react";
 
-const marks = [
-  { subject: "Math", mark: 78 },
-  { subject: "CS", mark: 84 },
-  { subject: "Physics", mark: 74 },
-  { subject: "English", mark: 88 },
-];
+interface Announcement {
+  id: string;
+  title: string;
+  body: string;
+  created_at: string;
+  classes?: { name: string };
+}
 
-const attendance = [
-  { week: "W1", value: 92 },
-  { week: "W2", value: 90 },
-  { week: "W3", value: 91 },
-  { week: "W4", value: 88 },
-  { week: "W5", value: 89 },
-  { week: "W6", value: 91 },
-];
-
-const notifications = [
-  {
-    id: "s1",
-    title: "Assignment graded",
-    description: "ENG-101 Essay 2: 88/100",
-    timestamp: "1h",
-    unread: true,
-  },
-  {
-    id: "s2",
-    title: "Attendance warning",
-    description: "Physics attendance dipped below 85% in the last 2 weeks.",
-    timestamp: "2d",
-  },
-];
+interface AttendanceSummary {
+  total: number;
+  present: number;
+  late: number;
+  absent: number;
+  attendancePct: number;
+}
 
 export default function StudentDashboard() {
   const { profile } = useAuth();
-  const risk = "Yellow" as "Green" | "Yellow" | "Red";
-  const riskTone = risk === "Green" ? "ai" : risk === "Yellow" ? "brand2" : "default";
+
+  const [marks, setMarks] = useState<any[]>([]);
+  const [marksSummary, setMarksSummary] = useState<{ total: number; average: number }>({ total: 0, average: 0 });
+  const [attendanceSummary, setAttendanceSummary] = useState<AttendanceSummary>({ total: 0, present: 0, late: 0, absent: 0, attendancePct: 0 });
+  const [attendanceHistory, setAttendanceHistory] = useState<any[]>([]);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // ── Fetch marks ──────────────────────────────────────────────────────────────
+  const fetchMarks = useCallback(async () => {
+    try {
+      const { data } = await api.get("/api/student/marks");
+      if (data.success) {
+        const formatted = data.data.map((m: any) => ({
+          subject: m.subject?.name || m.subjects?.name || "Unknown",
+          mark: m.marks_obtained,
+          max: m.exam?.max_marks || m.exams?.max_marks || 100,
+        }));
+        setMarks(formatted);
+        setMarksSummary(data.summary || { total: formatted.length, average: 0 });
+      }
+    } catch (err) {
+      // Fallback to old endpoint
+      try {
+        const { data } = await api.get("/api/marks/me");
+        if (data.success) {
+          const formatted = data.data.map((m: any) => ({
+            subject: m.subject?.name || "Unknown",
+            mark: m.marks_obtained,
+            max: m.exam?.max_marks || 100,
+          }));
+          setMarks(formatted);
+        }
+      } catch { /* silent */ }
+    }
+  }, []);
+
+  // ── Fetch attendance ─────────────────────────────────────────────────────────
+  const fetchAttendance = useCallback(async () => {
+    try {
+      const { data } = await api.get("/api/student/attendance");
+      if (data.success) {
+        setAttendanceSummary(data.summary || { total: 0, present: 0, late: 0, absent: 0, attendancePct: 0 });
+
+        // Build weekly chart data from records
+        const records: any[] = data.data || [];
+        const weekMap: Record<string, { present: number; total: number }> = {};
+        records.forEach((r: any) => {
+          const d = new Date(r.date);
+          const week = `W${Math.ceil(d.getDate() / 7)}`;
+          if (!weekMap[week]) weekMap[week] = { present: 0, total: 0 };
+          weekMap[week].total++;
+          if (r.status === "present" || r.status === "late") weekMap[week].present++;
+        });
+
+        const chartData = Object.entries(weekMap)
+          .slice(-6)
+          .map(([week, v]) => ({ week, value: v.total > 0 ? Math.round((v.present / v.total) * 100) : 0 }));
+
+        setAttendanceHistory(chartData.length > 0 ? chartData : [
+          { week: "W1", value: 0 }, { week: "W2", value: 0 }, { week: "W3", value: 0 },
+        ]);
+      }
+    } catch { /* silent */ }
+  }, []);
+
+  // ── Fetch announcements ──────────────────────────────────────────────────────
+  const fetchAnnouncements = useCallback(async () => {
+    try {
+      const { data } = await api.get("/api/student/announcements");
+      if (data.success) setAnnouncements(data.data || []);
+    } catch { /* silent */ }
+  }, []);
+
+  // ── Initial load ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    Promise.all([fetchMarks(), fetchAttendance(), fetchAnnouncements()])
+      .finally(() => setLoading(false));
+  }, [fetchMarks, fetchAttendance, fetchAnnouncements]);
+
+  // ── Realtime subscriptions ───────────────────────────────────────────────────
+  useRealtime({
+    table: "marks",
+    event: "*",
+    callback: () => {
+      toast.info("Marks updated!");
+      fetchMarks();
+    },
+  });
+
+  useRealtime({
+    table: "attendance",
+    event: "*",
+    callback: () => {
+      fetchAttendance();
+    },
+  });
+
+  useRealtime({
+    table: "announcements",
+    event: "INSERT",
+    callback: (payload: any) => {
+      toast.info(`📢 New announcement: ${payload?.new?.title || "Check announcements"}`);
+      fetchAnnouncements();
+    },
+  });
 
   const displayName = profile?.firstName
-    ? `${profile.firstName} ${profile.lastName || ''}`.trim()
-    : profile?.email?.split('@')[0] || 'Student';
+    ? `${profile.firstName} ${profile.lastName || ""}`.trim()
+    : profile?.email?.split("@")[0] || "Student";
+
+  const formatDate = (dateStr: string) => {
+    const d = new Date(dateStr);
+    return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  };
 
   return (
     <CampusShell
       role="student"
-      title={`Welcome back, ${profile?.firstName || 'Student'} 👋`}
-      notifications={notifications}
+      title={`Welcome back, ${profile?.firstName || "Student"} 👋`}
       user={{ name: displayName, role: "Student" }}
     >
       <div className="grid gap-6">
+        {/* ── Stat Cards ── */}
         <section className="grid gap-4 md:grid-cols-3">
-          <StatCard label="Attendance %" value="89%" hint="Last 6 weeks" tone="brand2" />
-          <StatCard label="Overall performance" value="81" hint="Avg. marks" />
-          <StatCard label="AI Risk Level" value={risk} hint="Updated today" tone={riskTone} />
+          <StatCard
+            label="Attendance %"
+            value={`${attendanceSummary.attendancePct}%`}
+            hint={`${attendanceSummary.present} present / ${attendanceSummary.total} total`}
+            tone="brand2"
+          />
+          <StatCard
+            label="Avg. Marks"
+            value={marksSummary.average > 0 ? `${marksSummary.average}` : "—"}
+            hint={`Across ${marksSummary.total} exam(s)`}
+          />
+          <StatCard
+            label="Announcements"
+            value={`${announcements.length}`}
+            hint="From your classes"
+            tone="ai"
+          />
         </section>
 
+        {/* ── Marks Chart + Announcements ── */}
         <section className="grid gap-4 lg:grid-cols-3">
           <Card className="lg:col-span-2">
             <CardHeader>
-              <CardTitle className="text-base">Marks per subject</CardTitle>
+              <CardTitle className="text-base">Marks per Subject</CardTitle>
             </CardHeader>
             <CardContent className="h-[280px]">
-              <div className="h-full w-full text-primary">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={marks} margin={{ left: 8, right: 12, top: 8, bottom: 8 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="subject" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                    <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} domain={[60, 95]} />
-                    <Tooltip
-                      contentStyle={{
-                        background: "hsl(var(--popover))",
-                        border: "1px solid hsl(var(--border))",
-                        borderRadius: 10,
-                      }}
-                    />
-                    <Bar dataKey="mark" fill="currentColor" radius={[8, 8, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+              {loading ? (
+                <div className="flex justify-center items-center h-full">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : marks.length === 0 ? (
+                <div className="flex flex-col justify-center items-center h-full text-muted-foreground">
+                  <p className="text-sm">No marks recorded yet.</p>
+                </div>
+              ) : (
+                <div className="h-full w-full text-primary">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={marks} margin={{ left: 8, right: 12, top: 8, bottom: 8 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="subject" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                      <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} domain={[0, 100]} />
+                      <Tooltip
+                        contentStyle={{
+                          background: "hsl(var(--popover))",
+                          border: "1px solid hsl(var(--border))",
+                          borderRadius: 10,
+                        }}
+                      />
+                      <Bar dataKey="mark" fill="currentColor" radius={[8, 8, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
             </CardContent>
           </Card>
 
+          {/* ── Announcements Feed ── */}
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">AI Coach</CardTitle>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Megaphone className="h-4 w-4" /> Announcements
+              </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
-              <CoachItem tone="ai" title="What you're doing well">
-                Strong performance in English and steady progress in CS.
-              </CoachItem>
-              <CoachItem tone="brand2" title="Watch this">
-                Physics attendance is trending down — aim for 2 extra sessions this month.
-              </CoachItem>
-              <CoachItem tone="default" title="Next step">
-                Review Physics Week 4 notes and complete 10 practice questions.
-              </CoachItem>
+            <CardContent className="space-y-3 max-h-[280px] overflow-y-auto">
+              {loading ? (
+                <div className="flex justify-center py-4"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+              ) : announcements.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">No announcements yet.</p>
+              ) : (
+                announcements.slice(0, 5).map(a => (
+                  <div key={a.id} className="rounded-lg border bg-muted/30 p-3 space-y-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm font-medium leading-tight">{a.title}</p>
+                      <span className="text-xs text-muted-foreground shrink-0 flex items-center gap-1">
+                        <Clock className="h-3 w-3" />{formatDate(a.created_at)}
+                      </span>
+                    </div>
+                    {a.classes?.name && (
+                      <Badge variant="outline" className="text-xs">{a.classes.name}</Badge>
+                    )}
+                    <p className="text-xs text-muted-foreground line-clamp-2">{a.body}</p>
+                  </div>
+                ))
+              )}
             </CardContent>
           </Card>
         </section>
 
+        {/* ── Attendance Chart ── */}
         <section>
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Attendance over time</CardTitle>
+              <CardTitle className="text-base">Attendance Over Time</CardTitle>
             </CardHeader>
-            <CardContent className="h-[300px]">
-              <div className="h-full w-full text-brand2">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={attendance} margin={{ left: 8, right: 12, top: 8, bottom: 8 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="week" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                    <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} domain={[84, 96]} />
-                    <Tooltip
-                      contentStyle={{
-                        background: "hsl(var(--popover))",
-                        border: "1px solid hsl(var(--border))",
-                        borderRadius: 10,
-                      }}
-                    />
-                    <Line type="monotone" dataKey="value" stroke="currentColor" strokeWidth={2.5} dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
+            <CardContent className="h-[240px]">
+              {attendanceHistory.length === 0 ? (
+                <div className="flex justify-center items-center h-full text-muted-foreground text-sm">
+                  No attendance data yet.
+                </div>
+              ) : (
+                <div className="h-full w-full text-brand2">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={attendanceHistory} margin={{ left: 8, right: 12, top: 8, bottom: 8 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="week" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                      <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} domain={[0, 100]} />
+                      <Tooltip
+                        contentStyle={{
+                          background: "hsl(var(--popover))",
+                          border: "1px solid hsl(var(--border))",
+                          borderRadius: 10,
+                        }}
+                        formatter={(v: any) => [`${v}%`, "Attendance"]}
+                      />
+                      <Line type="monotone" dataKey="value" stroke="currentColor" strokeWidth={2.5} dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
             </CardContent>
           </Card>
         </section>

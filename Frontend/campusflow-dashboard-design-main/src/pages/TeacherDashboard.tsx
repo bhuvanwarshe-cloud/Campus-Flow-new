@@ -25,6 +25,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { useAuth } from "@/contexts/AuthContext";
 import { Skeleton } from "@/components/ui/skeleton";
 import api from "@/lib/api";
+import { FileUpload } from "@/components/campusflow/FileUpload";
 
 const classPulse = [
   { day: "Mon", attention: 78 },
@@ -85,7 +86,6 @@ export default function TeacherDashboard() {
     <CampusShell
       role="teacher"
       title={`Welcome back, ${displayName} 👋`}
-      notifications={[]}
       user={{ name: displayName, role: "Teacher" }}
     >
       <div className="grid gap-6">
@@ -211,6 +211,19 @@ export default function TeacherDashboard() {
               </div>
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Quick Upload</CardTitle>
+              <CardDescription>Share resources with your students</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <FileUpload
+                bucket="course-materials"
+                onUploadComplete={(data) => console.log("Uploaded:", data)}
+              />
+            </CardContent>
+          </Card>
         </section>
       </div>
     </CampusShell>
@@ -219,7 +232,7 @@ export default function TeacherDashboard() {
 
 function DashboardSkeleton() {
   return (
-    <CampusShell role="teacher" title="Loading..." notifications={[]} user={{ name: "", role: "" }}>
+    <CampusShell role="teacher" title="Loading..." user={{ name: "", role: "" }}>
       <div className="grid gap-6">
         <div className="grid gap-4 md:grid-cols-4">
           {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-24 w-full" />)}

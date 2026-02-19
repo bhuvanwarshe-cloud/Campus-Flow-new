@@ -1,60 +1,85 @@
 /**
  * Notifications Controller
- * Handles creation and retrieval of notifications
  */
-
-import supabaseService from "../services/supabase.service.js";
+import { supabase } from "../config/supabase.js";
 import { AppError, asyncHandler } from "../utils/errorHandler.js";
 
 /**
- * Send notification to a class
- * POST /api/notifications
- * @param {Object} req - Express request
- * @param {Object} res - Express response
+ * Get my notifications
+ * GET /api/notifications
  */
-export const sendNotification = asyncHandler(async (req, res) => {
+export const getMyNotifications = asyncHandler(async (req, res) => {
     const userId = req.user.id;
-    const { classId, title, message } = req.body;
 
-    if (!classId || !title || !message) {
-        throw new AppError("Missing required fields", 400);
+    const { data, error } = await supabase
+        .from("notifications")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(50); // Limit to last 50 notifications
+
+    if (error) {
+        throw new AppError(error.message, 500);
     }
 
-    // Verify teacher access
-    const isTeacher = await supabaseService.isTeacherInClass(userId, classId);
-    if (!isTeacher) {
-        throw new AppError("You are not assigned to this class", 403);
-    }
-
-    // Create notification
-    const notification = await supabaseService.createNotification({
-        class_id: classId,
-        teacher_id: userId,
-        title,
-        message,
-    });
-
-    res.status(201).json({
+    res.status(200).json({
         success: true,
-        data: notification,
-        message: "Notification sent successfully",
+        data,
     });
 });
 
 /**
- * Get notifications (Teacher View)
- * GET /api/notifications/teacher
- * @param {Object} req - Express request
- * @param {Object} res - Express response
+ * Mark notification as read
+ * PATCH /api/notifications/:id/read
  */
-export const getTeacherNotifications = asyncHandler(async (req, res) => {
+export const markAsRead = asyncHandler(async (req, res) => {
     const userId = req.user.id;
+    const { id } = req.params;
 
-    // Get notifications sent BY this teacher
-    const notifications = await supabaseService.getNotifications({ teacherId: userId });
+    const { data, error } = await supabase
+        .from("notifications")
+        .update({ is_read: true })
+        .eq("id", id)
+        .eq("user_id", userId) // Security: Ensure user owns notification
+        .select()
+        .single();
+
+    if (error) {
+        throw new AppError(error.message, 500);
+    }
 
     res.status(200).json({
         success: true,
-        data: notifications,
+        data,
+    });
+});
+
+/**
+ * Create notification (Internal/Admin use)
+ * POST /api/notifications
+ */
+export const createNotification = asyncHandler(async (req, res) => {
+    // Only allow if needed, triggers usually handle this
+    const { userId, title, message, type, link } = req.body;
+
+    const { data, error } = await supabase
+        .from("notifications")
+        .insert([{
+            user_id: userId,
+            title,
+            message,
+            type: type || 'info',
+            link
+        }])
+        .select()
+        .single();
+
+    if (error) {
+        throw new AppError(error.message, 500);
+    }
+
+    res.status(201).json({
+        success: true,
+        data
     });
 });

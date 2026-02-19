@@ -17,6 +17,8 @@ import TeacherClassDetails from "./pages/TeacherClassDetails";
 import TeacherAttendance from "./pages/TeacherAttendance";
 import TeacherMarks from "./pages/TeacherMarks";
 import TeacherNotifications from "./pages/TeacherNotifications";
+import TeacherAnnouncements from "./pages/TeacherAnnouncements";
+import TeacherStudents from "./pages/TeacherStudents";
 
 const queryClient = new QueryClient();
 
@@ -103,6 +105,22 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <TeacherNotifications />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/teacher/announcements"
+              element={
+                <ProtectedRoute>
+                  <TeacherAnnouncements />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/teacher/students"
+              element={
+                <ProtectedRoute>
+                  <TeacherStudents />
                 </ProtectedRoute>
               }
             />

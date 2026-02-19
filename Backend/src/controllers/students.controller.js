@@ -5,6 +5,7 @@
 
 import * as supabaseService from "../services/supabase.service.js";
 import { AppError, asyncHandler } from "../utils/errorHandler.js";
+import { formatPaginatedResponse } from "../utils/pagination.js";
 
 /**
  * POST /students
@@ -35,24 +36,26 @@ export const createStudent = asyncHandler(async (req, res) => {
   });
 });
 
+
+
 /**
  * GET /students
  * List all students (optionally filtered by creator)
  */
 export const getStudents = asyncHandler(async (req, res) => {
+  const { page, limit, createdBy } = req.query;
   const filters = {};
 
   // Optional: filter by creator
-  if (req.query.createdBy) {
-    filters.createdBy = req.query.createdBy;
+  if (createdBy) {
+    filters.createdBy = createdBy;
   }
 
-  const students = await supabaseService.getStudents(filters);
+  const { data, count } = await supabaseService.getStudents(filters, page, limit);
 
   res.json({
     success: true,
-    data: students,
-    count: students.length,
+    ...formatPaginatedResponse(data, count, page, limit),
   });
 });
 

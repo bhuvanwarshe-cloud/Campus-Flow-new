@@ -4,11 +4,9 @@ import { UserMenu } from "@/components/campusflow/UserMenu";
 
 export function CampusTopbar({
   title,
-  notifications,
   user,
 }: {
   title: string;
-  notifications: CampusNotification[];
   user: { name: string; role: string };
 }) {
   return (
@@ -22,7 +20,7 @@ export function CampusTopbar({
         </div>
 
         <div className="flex items-center gap-1">
-          <NotificationsDropdown notifications={notifications} />
+          <NotificationsDropdown />
           <UserMenu name={user.name} role={user.role} />
         </div>
       </div>

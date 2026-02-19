@@ -9,7 +9,7 @@ export default function TeacherClassDetails() {
     const { profile } = useAuth();
 
     return (
-        <CampusShell role="teacher" title="Class Details" user={{ name: profile?.firstName || "", role: "Teacher" }} notifications={[]}>
+        <CampusShell role="teacher" title="Class Details" user={{ name: profile?.firstName || "", role: "Teacher" }}>
             <div className="space-y-6">
                 <h2 className="text-2xl font-bold">Class {classId}</h2>
                 <Tabs defaultValue="students">

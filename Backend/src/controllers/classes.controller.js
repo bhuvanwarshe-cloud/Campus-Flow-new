@@ -5,6 +5,7 @@
 
 import * as supabaseService from "../services/supabase.service.js";
 import { AppError, asyncHandler } from "../utils/errorHandler.js";
+import { formatPaginatedResponse } from "../utils/pagination.js";
 
 /**
  * POST /classes/**
@@ -13,19 +14,30 @@ import { AppError, asyncHandler } from "../utils/errorHandler.js";
  */
 export const getMyClasses = asyncHandler(async (req, res) => {
   const userId = req.user.id;
+  console.log(`🔍 getMyClasses called for user: ${userId}`);
 
   // Ensure user is a teacher
-  const role = await supabaseService.getUserRole(userId);
-  if (role !== 'teacher') {
-    throw new AppError("Only teachers can access this", 403);
+  try {
+    const role = await supabaseService.getUserRole(userId);
+    console.log(`   User role: ${role}`);
+
+    if (role !== 'teacher') {
+      console.warn(`   ⛔ Access denied: Role is ${role}, expected 'teacher'`);
+      throw new AppError("Only teachers can access this", 403);
+    }
+
+    console.log(`   Fetching teacher classes...`);
+    const classes = await supabaseService.getTeacherClasses(userId);
+    console.log(`   ✅ Found ${classes.length} classes`);
+
+    res.status(200).json({
+      success: true,
+      data: classes,
+    });
+  } catch (error) {
+    console.error("❌ Error in getMyClasses:", error);
+    throw error; // Re-throw to be caught by asyncHandler
   }
-
-  const classes = await supabaseService.getTeacherClasses(userId);
-
-  res.status(200).json({
-    success: true,
-    data: classes,
-  });
 });
 
 /**
@@ -56,24 +68,26 @@ export const createClass = asyncHandler(async (req, res) => {
   });
 });
 
+
+
 /**
  * GET /classes
  * List all classes
  */
 export const getClasses = asyncHandler(async (req, res) => {
+  const { page, limit, createdBy } = req.query;
   const filters = {};
 
   // Optional: filter by creator
-  if (req.query.createdBy) {
-    filters.createdBy = req.query.createdBy;
+  if (createdBy) {
+    filters.createdBy = createdBy;
   }
 
-  const classes = await supabaseService.getClasses(filters);
+  const { data, count } = await supabaseService.getClasses(filters, page, limit);
 
   res.json({
     success: true,
-    data: classes,
-    count: classes.length,
+    ...formatPaginatedResponse(data, count, page, limit),
   });
 });
 

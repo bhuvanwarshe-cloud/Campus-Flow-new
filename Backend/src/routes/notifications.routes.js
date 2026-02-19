@@ -4,16 +4,22 @@
 
 import express from "express";
 import * as notificationsController from "../controllers/notifications.controller.js";
-import { authMiddleware } from "../middleware/auth.middleware.js";
+import authMiddleware from "../middleware/auth.middleware.js";
 
 const router = express.Router();
 
 router.use(authMiddleware);
 
-// POST /notifications - Send notification
-router.post("/", notificationsController.sendNotification);
+// GET /api/notifications - Get all notifications for current user
+router.get("/", notificationsController.getMyNotifications);
 
-// GET /notifications/teacher - Get notifications sent by teacher
-router.get("/teacher", notificationsController.getTeacherNotifications);
+// POST /api/notifications - Create notification (manual)
+router.post("/", notificationsController.createNotification);
+
+// GET /api/notifications/teacher - Get notifications sent by/for this teacher (alias of /)
+router.get("/teacher", notificationsController.getMyNotifications);
+
+// PATCH /api/notifications/:id/read - Mark as read
+router.patch("/:id/read", notificationsController.markAsRead);
 
 export default router;

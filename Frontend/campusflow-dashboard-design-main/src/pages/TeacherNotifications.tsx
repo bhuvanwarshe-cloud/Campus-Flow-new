@@ -23,24 +23,33 @@ export default function TeacherNotifications() {
 
     useEffect(() => {
         api.get('/api/classes/teacher').then(res => setClasses(res.data.data || [])).catch(console.error);
-        // Fetch history
-        api.get('/api/notifications/teacher').then(res => setHistory(res.data.data || [])).catch(console.error);
     }, []);
+
+    // Load announcement history when class changes
+    useEffect(() => {
+        if (!selectedClassId) return;
+        api.get(`/api/teacher/announcements/${selectedClassId}`)
+            .then(res => setHistory(res.data.data || []))
+            .catch(console.error);
+    }, [selectedClassId]);
 
     const handleSend = async () => {
         if (!selectedClassId || !title || !message) return;
         setSending(true);
         try {
-            await api.post('/api/notifications', {
+            // Use the announcement API to broadcast to the class
+            await api.post('/api/teacher/announcement', {
                 classId: selectedClassId,
                 title,
-                message
+                body: message,
             });
             toast({ title: "Sent!", description: "Notification sent to class." });
             setTitle("");
             setMessage("");
-            // Refresh history
-            api.get('/api/notifications/teacher').then(res => setHistory(res.data.data || [])).catch(console.error);
+            // Refresh history from announcements
+            api.get(`/api/teacher/announcements/${selectedClassId}`)
+                .then(res => setHistory(res.data.data || []))
+                .catch(console.error);
         } catch (err) {
             toast({ title: "Error", description: "Failed to send.", variant: "destructive" });
         } finally {
@@ -49,7 +58,7 @@ export default function TeacherNotifications() {
     };
 
     return (
-        <CampusShell role="teacher" title="Notifications" user={{ name: profile?.firstName || "", role: "Teacher" }} notifications={[]}>
+        <CampusShell role="teacher" title="Notifications" user={{ name: profile?.firstName || "", role: "Teacher" }}>
             <div className="grid gap-6 md:grid-cols-2">
                 <Card>
                     <CardHeader>
