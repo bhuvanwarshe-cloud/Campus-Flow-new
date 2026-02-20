@@ -21,6 +21,7 @@
  */
 
 import { supabaseAuth } from "../config/supabase.js";
+import supabaseService from "../services/supabase.service.js";
 import { AppError } from "../utils/errorHandler.js";
 
 /**
@@ -95,6 +96,45 @@ export const authMiddleware = async (req, res, next) => {
     // Handle authentication errors with proper HTTP status codes
     const statusCode = err.statusCode || 401;
     const message = err.message || "Unauthorized";
+
+    res.status(statusCode).json({
+      success: false,
+      error: {
+        message,
+        statusCode,
+      },
+    });
+  }
+};
+
+/**
+ * ensureAdmin
+ * Middleware that ensures the authenticated user has admin role.
+ * Uses the shared supabaseService.getUserRole helper for consistency.
+ *
+ * Usage (after authMiddleware):
+ *   router.use(authMiddleware);
+ *   router.use(ensureAdmin);
+ */
+export const ensureAdmin = async (req, res, next) => {
+  try {
+    if (!req.user || !req.user.id) {
+      throw new AppError("Unauthorized", 401);
+    }
+
+    const role = await supabaseService.getUserRole(req.user.id);
+
+    if (role !== "admin") {
+      throw new AppError("Access denied. Admin only.", 403);
+    }
+
+    // Attach role for downstream handlers
+    req.user.role = role;
+
+    next();
+  } catch (err) {
+    const statusCode = err.statusCode || 500;
+    const message = err.message || "Failed to verify admin access";
 
     res.status(statusCode).json({
       success: false,

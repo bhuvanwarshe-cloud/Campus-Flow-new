@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Supabase Service Layer
  * Centralized database operations with consistent error handling
  */
@@ -34,6 +34,745 @@ export const getUserRole = async (userId) => {
   }
 
   return data[0].role;
+};
+
+// ============================================
+// ADMIN OVERVIEW & USER MANAGEMENT HELPERS
+// ============================================
+
+/**
+ * Internal helper to build a map of user_id -> is_active flag.
+ * If the is_active column does not exist, all users are treated as active.
+ *
+ * @param {string[]} userIds
+ * @returns {Promise<Record<string, boolean>>}
+ */
+const getUserActiveMap = async (userIds) => {
+  if (!userIds || userIds.length === 0) return {};
+
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("profiles")
+      .select("user_id, is_active")
+      .in("user_id", userIds);
+
+    if (error) {
+      // 42703 = undefined column (is_active not created yet)
+      if (error.code === "42703") {
+        console.warn("ℹ️ profiles.is_active column not found, defaulting all users to active.");
+        return {};
+      }
+      console.error("❌ Error fetching user active map:", error);
+      throw new AppError("Failed to fetch user status", 500);
+    }
+
+    const map = {};
+    (data || []).forEach((row) => {
+      // Default to true when null/undefined
+      map[row.user_id] = row.is_active !== false;
+    });
+
+    return map;
+  } catch (err) {
+    console.error("❌ getUserActiveMap unexpected error:", err);
+    // Fail open: treat everyone as active rather than blocking admin UI
+    return {};
+  }
+};
+
+/**
+ * Get high-level overview stats for admin dashboard.
+ * - Total users (profiles)
+ * - Total students & teachers
+ * - Total classes
+ * - Average attendance %
+ * - Average marks
+ */
+export const getAdminOverview = async () => {
+  // Users & roles: Count from student_profiles and teacher_profiles tables
+  // (more reliable than profiles.role which may not exist)
+  let totalUsers = 0;
+  let totalStudents = 0;
+  let totalTeachers = 0;
+
+  try {
+    // Count students from student_profiles
+    const { count: studentCount, error: studentsError } = await supabase
+      .from("student_profiles")
+      .select("user_id", { count: "exact", head: true });
+
+    if (studentsError) {
+      // 42P01 = table doesn't exist, try fallback to profiles
+      if (studentsError.code === "42P01") {
+        console.warn("ℹ️ student_profiles table not found, trying profiles table");
+        const { count: fallbackCount, error: fallbackError } = await supabase
+          .from("profiles")
+          .select("user_id", { count: "exact", head: true })
+          .eq("role", "student");
+        if (fallbackError) {
+          console.error("❌ Error fetching total students (fallback):", fallbackError);
+          throw new AppError(`Failed to fetch students overview: ${fallbackError.message || fallbackError.code || 'Unknown error'}`, 500);
+        }
+        totalStudents = fallbackCount || 0;
+      } else {
+        console.error("❌ Error fetching total students:", studentsError);
+        throw new AppError(`Failed to fetch students overview: ${studentsError.message || studentsError.code || 'Unknown error'}`, 500);
+      }
+    } else {
+      totalStudents = studentCount || 0;
+    }
+
+    // Count teachers from teacher_profiles
+    const { count: teacherCount, error: teachersError } = await supabase
+      .from("teacher_profiles")
+      .select("user_id", { count: "exact", head: true });
+
+    if (teachersError) {
+      // 42P01 = table doesn't exist, try fallback to profiles
+      if (teachersError.code === "42P01") {
+        console.warn("ℹ️ teacher_profiles table not found, trying profiles table");
+        const { count: fallbackCount, error: fallbackError } = await supabase
+          .from("profiles")
+          .select("user_id", { count: "exact", head: true })
+          .eq("role", "teacher");
+        if (fallbackError) {
+          console.error("❌ Error fetching total teachers (fallback):", fallbackError);
+          throw new AppError(`Failed to fetch teachers overview: ${fallbackError.message || fallbackError.code || 'Unknown error'}`, 500);
+        }
+        totalTeachers = fallbackCount || 0;
+      } else {
+        console.error("❌ Error fetching total teachers:", teachersError);
+        throw new AppError(`Failed to fetch teachers overview: ${teachersError.message || teachersError.code || 'Unknown error'}`, 500);
+      }
+    } else {
+      totalTeachers = teacherCount || 0;
+    }
+
+    // Total users = students + teachers (profiles table may include admins, so sum is more accurate)
+    totalUsers = totalStudents + totalTeachers;
+
+    // If profiles table exists and has data, use it as a cross-check
+    const { count: profilesCount, error: profilesError } = await supabase
+      .from("profiles")
+      .select("user_id", { count: "exact", head: true });
+
+    if (!profilesError && profilesCount !== null) {
+      // Use profiles count if it's higher (includes admins)
+      totalUsers = Math.max(totalUsers, profilesCount || 0);
+    }
+  } catch (err) {
+    // If it's already an AppError, re-throw it
+    if (err instanceof AppError) {
+      throw err;
+    }
+    console.error("❌ Unexpected error in getAdminOverview (users/roles):", err);
+    throw new AppError(`Failed to fetch users overview: ${err.message || 'Unknown error'}`, 500);
+  }
+
+  // Classes (soft-delete aware if deleted_at exists)
+  // Non-fatal: if classes table doesn't exist or has issues, default to 0
+  let totalClasses = 0;
+  try {
+    const { count, error } = await supabase
+      .from("classes")
+      .select("id", { count: "exact", head: true })
+      .is("deleted_at", null);
+
+    if (error) {
+      // 42703 = undefined column deleted_at (no soft delete yet)
+      if (error.code === "42703") {
+        const { count: fallbackCount, error: fallbackError } = await supabase
+          .from("classes")
+          .select("id", { count: "exact", head: true });
+        if (fallbackError) {
+          // 42P01 = table doesn't exist - non-fatal, return 0
+          if (fallbackError.code === "42P01") {
+            console.warn("ℹ️ classes table not found, defaulting to 0");
+            totalClasses = 0;
+          } else {
+            console.error("❌ Error fetching classes (fallback):", fallbackError);
+            // Non-fatal: log error but don't throw, default to 0
+            totalClasses = 0;
+          }
+        } else {
+          totalClasses = fallbackCount || 0;
+        }
+      } else if (error.code === "42P01") {
+        // Table doesn't exist - non-fatal, return 0
+        console.warn("ℹ️ classes table not found, defaulting to 0");
+        totalClasses = 0;
+      } else {
+        console.error("❌ Error fetching classes overview:", error);
+        // Non-fatal: log error but don't throw, default to 0
+        totalClasses = 0;
+      }
+    } else {
+      totalClasses = count || 0;
+    }
+  } catch (err) {
+    // Non-fatal: log error but don't fail the entire overview
+    console.error("❌ Unexpected error fetching classes overview:", err);
+    totalClasses = 0;
+  }
+
+  // Attendance stats (overall)
+  let avgAttendancePct = 0;
+  try {
+    const { data: attendanceRows, error: attendanceError } = await supabase
+      .from("attendance")
+      .select("status");
+
+    if (attendanceError) {
+      if (attendanceError.code !== "42P01") {
+        console.error("❌ Error fetching attendance for overview:", attendanceError);
+        throw new AppError("Failed to fetch attendance overview", 500);
+      }
+    } else if (attendanceRows && attendanceRows.length > 0) {
+      const total = attendanceRows.length;
+      const presentLike = attendanceRows.filter(
+        (r) => r.status === "present" || r.status === "late"
+      ).length;
+      avgAttendancePct = Math.round((presentLike / total) * 100);
+    }
+  } catch (err) {
+    console.error("❌ Unexpected error fetching attendance overview:", err);
+    // Non-fatal – keep avgAttendancePct at 0
+  }
+
+  // Marks stats (overall)
+  let avgMarks = 0;
+  try {
+    const { data: markRows, error: marksError } = await supabase
+      .from("marks")
+      .select("marks_obtained");
+
+    if (marksError) {
+      if (marksError.code !== "42P01") {
+        console.error("❌ Error fetching marks for overview:", marksError);
+        throw new AppError("Failed to fetch marks overview", 500);
+      }
+    } else if (markRows && markRows.length > 0) {
+      const total = markRows.reduce(
+        (sum, m) => sum + (m.marks_obtained || 0),
+        0
+      );
+      avgMarks = Math.round((total / markRows.length) * 100) / 100;
+    }
+  } catch (err) {
+    console.error("❌ Unexpected error fetching marks overview:", err);
+    // Non-fatal – keep avgMarks at 0
+  }
+
+  return {
+    totals: {
+      users: totalUsers || 0,
+      students: totalStudents || 0,
+      teachers: totalTeachers || 0,
+      classes: totalClasses,
+    },
+    averages: {
+      attendancePct: avgAttendancePct,
+      marks: avgMarks,
+    },
+  };
+};
+
+/**
+ * Admin-facing unified users list with pagination and search.
+ * This reuses the existing getAllStudents/getAllTeachers helpers and
+ * enriches them with active status.
+ */
+export const getAdminUsers = async (options = {}) => {
+  try {
+    const page = Number.parseInt(options.page, 10) || 1;
+    const limitRaw = Number.parseInt(options.limit, 10) || 20;
+    const limit = Math.min(Math.max(limitRaw, 1), 100);
+    const search = (options.search || "").toString().trim().toLowerCase();
+
+    // Use Promise.allSettled to handle partial failures gracefully
+    const [studentsResult, teachersResult] = await Promise.allSettled([
+      getAllStudents(),
+      getAllTeachers(),
+    ]);
+
+    const students = studentsResult.status === "fulfilled" ? studentsResult.value : [];
+    const teachers = teachersResult.status === "fulfilled" ? teachersResult.value : [];
+
+    // Log any failures but continue with available data
+    if (studentsResult.status === "rejected") {
+      console.warn("⚠️ Failed to fetch students in getAdminUsers:", studentsResult.reason);
+    }
+    if (teachersResult.status === "rejected") {
+      console.warn("⚠️ Failed to fetch teachers in getAdminUsers:", teachersResult.reason);
+    }
+
+    let allUsers = [
+      ...(students || []).map((s) => ({
+        id: s.user_id,
+        first_name: s.first_name,
+        last_name: s.last_name,
+        email: s.email,
+        role: "student",
+        created_at: s.created_at,
+      })),
+      ...(teachers || []).map((t) => ({
+        id: t.user_id,
+        first_name: t.first_name,
+        last_name: t.last_name,
+        email: t.email,
+        role: "teacher",
+        created_at: t.created_at,
+      })),
+    ];
+
+    // Basic search across name + email
+    if (search) {
+      allUsers = allUsers.filter((u) => {
+        const fullName = `${u.first_name || ""} ${u.last_name || ""}`.toLowerCase();
+        const email = (u.email || "").toLowerCase();
+        return (
+          fullName.includes(search) ||
+          email.includes(search)
+        );
+      });
+    }
+
+    const total = allUsers.length;
+    const totalPages = Math.ceil(total / limit) || 1;
+    const safePage = Math.min(Math.max(page, 1), totalPages);
+    const start = (safePage - 1) * limit;
+    const end = start + limit;
+    const pageItems = allUsers.slice(start, end);
+
+    // Attach active status where available (handle errors gracefully)
+    let activeMap = {};
+    try {
+      const userIds = pageItems.map((u) => u.id);
+      if (userIds.length > 0) {
+        activeMap = await getUserActiveMap(userIds);
+      }
+    } catch (activeError) {
+      console.warn("⚠️ Failed to fetch user active status:", activeError);
+      // Continue with default active status (true)
+    }
+
+    const data = pageItems.map((u) => ({
+      id: u.id,
+      full_name: `${u.first_name || ""} ${u.last_name || ""}`.trim() || null,
+      email: u.email || "N/A",
+      role: u.role,
+      is_active: activeMap[u.id] !== undefined ? activeMap[u.id] : true,
+      created_at: u.created_at,
+    }));
+
+    return {
+      data,
+      pagination: {
+        page: safePage,
+        limit,
+        total,
+        totalPages,
+      },
+    };
+  } catch (err) {
+    console.error("❌ Unexpected error in getAdminUsers:", err);
+    // Return empty result instead of throwing
+    return {
+      data: [],
+      pagination: {
+        page: 1,
+        limit: options.limit || 20,
+        total: 0,
+        totalPages: 0,
+      },
+    };
+  }
+};
+
+/**
+ * Update a user's role (admin/teacher/student) in both roles and profiles tables.
+ */
+export const updateUserRole = async (userId, newRole) => {
+  const allowedRoles = ["admin", "teacher", "student"];
+  const normalizedRole = (newRole || "").toString().toLowerCase().trim();
+
+  if (!allowedRoles.includes(normalizedRole)) {
+    throw new AppError(
+      `Invalid role. Allowed roles: ${allowedRoles.join(", ")}`,
+      400
+    );
+  }
+
+  // Update or insert into roles table
+  const { error: rolesError } = await supabaseAdmin
+    .from("roles")
+    .upsert(
+      [{ user_id: userId, role: normalizedRole }],
+      { onConflict: "user_id" }
+    );
+
+  if (rolesError) {
+    console.error("❌ Error updating user role (roles table):", rolesError);
+    throw new AppError("Failed to update user role", 500);
+  }
+
+  // Mirror role to profiles table when profile exists
+  const { data: profileData, error: profileError } = await supabaseAdmin
+    .from("profiles")
+    .update({ role: normalizedRole })
+    .eq("user_id", userId)
+    .select("user_id, role")
+    .maybeSingle();
+
+  if (profileError && profileError.code !== "PGRST116") {
+    console.error("❌ Error updating user role (profiles table):", profileError);
+    throw new AppError("Failed to update user role profile", 500);
+  }
+
+  return {
+    user_id: userId,
+    role: normalizedRole,
+    profileUpdated: !!profileData,
+  };
+};
+
+/**
+ * Update a user's active status flag in profiles table.
+ */
+export const updateUserStatus = async (userId, isActive) => {
+  const active = !!isActive;
+
+  const { data, error } = await supabaseAdmin
+    .from("profiles")
+    .update({ is_active: active })
+    .eq("user_id", userId)
+    .select("user_id, is_active")
+    .single();
+
+  if (error) {
+    // 42703 = undefined column is_active (migration not applied yet)
+    if (error.code === "42703") {
+      console.error("❌ profiles.is_active column missing:", error);
+      throw new AppError(
+        "User status column is not configured. Please run the latest migrations.",
+        500
+      );
+    }
+
+    console.error("❌ Error updating user status:", error);
+    throw new AppError("Failed to update user status", 500);
+  }
+
+  return data;
+};
+
+/**
+ * Admin-focused classes listing with teacher info and enrollment counts.
+ */
+export const getAdminClasses = async () => {
+  // Fetch all classes (we'll handle soft-deleted via deleted_at if present)
+  const { data: classes, error: classesError } = await supabase
+    .from("classes")
+    .select("*");
+
+  if (classesError) {
+    if (classesError.code === "42P01") {
+      // Table missing – treat as no classes rather than crashing admin UI
+      return [];
+    }
+    console.error("❌ Error fetching classes:", classesError);
+    throw new AppError("Failed to fetch classes", 500);
+  }
+
+  if (!classes || classes.length === 0) return [];
+
+  const classIds = classes.map((c) => c.id);
+
+  // Teacher assignments
+  const { data: teacherAssignments, error: teacherAssignError } = await supabase
+    .from("teacher_classes")
+    .select("class_id, teacher_id")
+    .in("class_id", classIds);
+
+  if (teacherAssignError && teacherAssignError.code !== "42P01") {
+    console.error("❌ Error fetching teacher assignments:", teacherAssignError);
+    throw new AppError("Failed to fetch teacher assignments", 500);
+  }
+
+  const teacherIds = [
+    ...new Set(
+      (teacherAssignments || []).map((t) => t.teacher_id)
+    ),
+  ];
+
+  let teacherMap = {};
+  if (teacherIds.length > 0) {
+    const { data: teacherProfiles, error: teacherProfilesError } =
+      await supabaseAdmin
+        .from("teacher_profiles")
+        .select("user_id, first_name, last_name")
+        .in("user_id", teacherIds);
+
+    if (teacherProfilesError && teacherProfilesError.code !== "42P01") {
+      console.error("❌ Error fetching teacher profiles:", teacherProfilesError);
+      throw new AppError("Failed to fetch teacher profiles", 500);
+    }
+
+    teacherMap = {};
+    (teacherProfiles || []).forEach((t) => {
+      teacherMap[t.user_id] = `${t.first_name || ""} ${
+        t.last_name || ""
+      }`.trim() || "Unknown Teacher";
+    });
+  }
+
+  // Enrollment counts per class
+  const { data: enrollments, error: enrollError } = await supabase
+    .from("enrollments")
+    .select("class_id, student_id")
+    .in("class_id", classIds);
+
+  if (enrollError && enrollError.code !== "42P01") {
+    console.error("❌ Error fetching enrollments:", enrollError);
+    throw new AppError("Failed to fetch enrollments", 500);
+  }
+
+  const enrollmentMap = {};
+  (enrollments || []).forEach((e) => {
+    enrollmentMap[e.class_id] = (enrollmentMap[e.class_id] || 0) + 1;
+  });
+
+  // Build response
+  const assignmentMap = {};
+  (teacherAssignments || []).forEach((a) => {
+    if (!assignmentMap[a.class_id]) assignmentMap[a.class_id] = [];
+    assignmentMap[a.class_id].push(a.teacher_id);
+  });
+
+  return classes.map((cls) => {
+    const assignedTeacherIds = assignmentMap[cls.id] || [];
+    const teachers = assignedTeacherIds.map((tid) => ({
+      id: tid,
+      name: teacherMap[tid] || "Unknown Teacher",
+    }));
+
+    const deletedAt = cls.deleted_at || null;
+
+    return {
+      id: cls.id,
+      name: cls.name,
+      section: cls.section || null,
+      created_at: cls.created_at,
+      deleted_at: deletedAt,
+      is_deleted: !!deletedAt,
+      teachers,
+      enrollment_count: enrollmentMap[cls.id] || 0,
+    };
+  });
+};
+
+/**
+ * Admin academics overview:
+ * - Weak classes (avg marks below threshold)
+ * - Low attendance classes
+ * - Teacher workload (classes & students taught)
+ */
+export const getAdminAcademics = async (options = {}) => {
+  const weakThreshold =
+    typeof options.weakThreshold === "number" ? options.weakThreshold : 50;
+  const attendanceThreshold =
+    typeof options.attendanceThreshold === "number"
+      ? options.attendanceThreshold
+      : 75;
+
+  // Base classes list
+  const { data: classes, error: classesError } = await supabase
+    .from("classes")
+    .select("id, name");
+
+  if (classesError && classesError.code !== "42P01") {
+    console.error("❌ Error fetching classes for academics:", classesError);
+    throw new AppError("Failed to fetch classes for academics overview", 500);
+  }
+
+  const classMap = {};
+  (classes || []).forEach((c) => {
+    classMap[c.id] = c.name || `Class ${c.id}`;
+  });
+
+  const classIds = Object.keys(classMap);
+  if (classIds.length === 0) {
+    return {
+      weakClasses: [],
+      lowAttendanceClasses: [],
+      teacherWorkload: [],
+    };
+  }
+
+  // Marks per class (using exam relationship)
+  let weakClasses = [];
+  try {
+    const { data: marks, error: marksError } = await supabase
+      .from("marks")
+      .select("marks_obtained, exam:exams(class_id)");
+
+    if (!marksError && marks && marks.length > 0) {
+      const marksByClass = {};
+      marks.forEach((m) => {
+        const classId = m.exam?.class_id;
+        if (!classId) return;
+        if (!marksByClass[classId]) {
+          marksByClass[classId] = { sum: 0, count: 0 };
+        }
+        marksByClass[classId].sum += m.marks_obtained || 0;
+        marksByClass[classId].count += 1;
+      });
+
+      weakClasses = Object.entries(marksByClass)
+        .map(([classId, v]) => {
+          const avg = v.count > 0 ? v.sum / v.count : 0;
+          return {
+            class_id: classId,
+            class_name: classMap[classId] || `Class ${classId}`,
+            avg_marks: Math.round(avg * 100) / 100,
+          };
+        })
+        .filter((c) => c.avg_marks < weakThreshold)
+        .sort((a, b) => a.avg_marks - b.avg_marks);
+    }
+  } catch (err) {
+    console.error("❌ Error computing weak classes:", err);
+    weakClasses = [];
+  }
+
+  // Attendance per class
+  let lowAttendanceClasses = [];
+  try {
+    const { data: attendanceRows, error: attendanceError } = await supabase
+      .from("attendance")
+      .select("class_id, status");
+
+    if (!attendanceError && attendanceRows && attendanceRows.length > 0) {
+      const attByClass = {};
+      attendanceRows.forEach((r) => {
+        const classId = r.class_id;
+        if (!classId) return;
+        if (!attByClass[classId]) {
+          attByClass[classId] = { total: 0, presentLike: 0 };
+        }
+        attByClass[classId].total += 1;
+        if (r.status === "present" || r.status === "late") {
+          attByClass[classId].presentLike += 1;
+        }
+      });
+
+      lowAttendanceClasses = Object.entries(attByClass)
+        .map(([classId, v]) => {
+          const pct =
+            v.total > 0
+              ? Math.round((v.presentLike / v.total) * 100)
+              : 0;
+          return {
+            class_id: classId,
+            class_name: classMap[classId] || `Class ${classId}`,
+            attendance_pct: pct,
+          };
+        })
+        .filter((c) => c.attendance_pct < attendanceThreshold)
+        .sort((a, b) => a.attendance_pct - b.attendance_pct);
+    }
+  } catch (err) {
+    console.error("❌ Error computing low attendance classes:", err);
+    lowAttendanceClasses = [];
+  }
+
+  // Teacher workload
+  let teacherWorkload = [];
+  try {
+    const { data: teacherAssignments, error: teacherAssignError } = await supabase
+      .from("teacher_classes")
+      .select("class_id, teacher_id");
+
+    if (teacherAssignError && teacherAssignError.code !== "42P01") {
+      throw teacherAssignError;
+    }
+
+    const { data: enrollments, error: enrollError } = await supabase
+      .from("enrollments")
+      .select("class_id, student_id");
+
+    if (enrollError && enrollError.code !== "42P01") {
+      throw enrollError;
+    }
+
+    const teacherIds = [
+      ...new Set((teacherAssignments || []).map((t) => t.teacher_id)),
+    ];
+
+    let teacherProfiles = [];
+    if (teacherIds.length > 0) {
+      const { data: tProfiles, error: tProfilesError } = await supabaseAdmin
+        .from("teacher_profiles")
+        .select("user_id, first_name, last_name")
+        .in("user_id", teacherIds);
+
+      if (tProfilesError && tProfilesError.code !== "42P01") {
+        throw tProfilesError;
+      }
+      teacherProfiles = tProfiles || [];
+    }
+
+    const teacherNameMap = {};
+    teacherProfiles.forEach((t) => {
+      teacherNameMap[t.user_id] = `${t.first_name || ""} ${
+        t.last_name || ""
+      }`.trim() || "Unknown Teacher";
+    });
+
+    // Map teacher -> class_ids
+    const teacherClassesMap = {};
+    (teacherAssignments || []).forEach((a) => {
+      if (!teacherClassesMap[a.teacher_id]) teacherClassesMap[a.teacher_id] = new Set();
+      teacherClassesMap[a.teacher_id].add(a.class_id);
+    });
+
+    // Map class -> student_ids
+    const classStudentsMap = {};
+    (enrollments || []).forEach((e) => {
+      if (!classStudentsMap[e.class_id]) classStudentsMap[e.class_id] = new Set();
+      classStudentsMap[e.class_id].add(e.student_id);
+    });
+
+    teacherWorkload = Object.entries(teacherClassesMap).map(
+      ([teacherId, classSet]) => {
+        const classIdsForTeacher = Array.from(classSet);
+        const studentSet = new Set();
+        classIdsForTeacher.forEach((cid) => {
+          const sSet = classStudentsMap[cid];
+          if (sSet) {
+            sSet.forEach((sid) => studentSet.add(sid));
+          }
+        });
+
+        return {
+          teacher_id: teacherId,
+          teacher_name:
+            teacherNameMap[teacherId] || `Teacher ${teacherId}`,
+          class_count: classIdsForTeacher.length,
+          student_count: studentSet.size,
+        };
+      }
+    );
+  } catch (err) {
+    console.error("❌ Error computing teacher workload:", err);
+    teacherWorkload = [];
+  }
+
+  return {
+    weakClasses,
+    lowAttendanceClasses,
+    teacherWorkload,
+  };
 };
 
 /**
@@ -840,43 +1579,75 @@ export const completeTeacherProfile = async (userId, mainProfileData, teacherPro
  * Admin only
  */
 export const getAllStudents = async () => {
-  const { data, error } = await supabaseAdmin
-    .from("student_profiles")
-    .select(`
-      user_id,
-      first_name,
-      last_name,
-      phone,
-      address,
-      branch,
-      degree,
-      registration_number,
-      profile_photo_url,
-      created_at,
-      updated_at
-    `)
-    .order("created_at", { ascending: false });
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("student_profiles")
+      .select(`
+        user_id,
+        first_name,
+        last_name,
+        phone,
+        address,
+        branch,
+        degree,
+        registration_number,
+        profile_photo_url,
+        created_at,
+        updated_at
+      `)
+      .order("created_at", { ascending: false });
 
-  if (error) {
-    console.error("❌ Error fetching students:", error);
-    throw new AppError("Failed to fetch students", 500);
+    if (error) {
+      // 42P01 = table doesn't exist - return empty array
+      if (error.code === "42P01") {
+        console.warn("ℹ️ student_profiles table not found, returning empty array");
+        return [];
+      }
+      console.error("❌ Error fetching students:", error);
+      throw new AppError(`Failed to fetch students: ${error.message || error.code || 'Unknown error'}`, 500);
+    }
+
+    if (!data || data.length === 0) {
+      return [];
+    }
+
+    // Fetch emails from auth.users (handle individual failures gracefully)
+    const studentsWithEmails = await Promise.allSettled(
+      data.map(async (student) => {
+        try {
+          const { data: userData } = await supabaseAdmin.auth.admin.getUserById(student.user_id);
+          return {
+            ...student,
+            email: userData?.user?.email || "N/A",
+            role: "student",
+            profile_complete: !!(student.first_name && student.last_name && student.branch && student.degree)
+          };
+        } catch (authError) {
+          // If auth lookup fails for one user, still return the student with N/A email
+          console.warn(`⚠️ Failed to fetch email for student ${student.user_id}:`, authError);
+          return {
+            ...student,
+            email: "N/A",
+            role: "student",
+            profile_complete: !!(student.first_name && student.last_name && student.branch && student.degree)
+          };
+        }
+      })
+    );
+
+    // Filter out any rejected promises and return fulfilled results
+    return studentsWithEmails
+      .filter((result) => result.status === "fulfilled")
+      .map((result) => result.value);
+  } catch (err) {
+    // If it's already an AppError, re-throw it
+    if (err instanceof AppError) {
+      throw err;
+    }
+    // For other errors, log and return empty array (non-fatal)
+    console.error("❌ Unexpected error in getAllStudents:", err);
+    return [];
   }
-
-  // Fetch emails from auth.users
-  const studentsWithEmails = await Promise.all(
-    (data || []).map(async (student) => {
-      const { data: userData } = await supabaseAdmin.auth.admin.getUserById(student.user_id);
-
-      return {
-        ...student,
-        email: userData?.user?.email || "N/A",
-        role: "student",
-        profile_complete: !!(student.first_name && student.last_name && student.branch && student.degree)
-      };
-    })
-  );
-
-  return studentsWithEmails;
 };
 
 /**
@@ -884,44 +1655,76 @@ export const getAllStudents = async () => {
  * Admin only
  */
 export const getAllTeachers = async () => {
-  const { data, error } = await supabaseAdmin
-    .from("teacher_profiles")
-    .select(`
-      user_id,
-      first_name,
-      last_name,
-      phone,
-      address,
-      department,
-      qualification,
-      experience_years,
-      subjects_taught,
-      profile_photo_url,
-      created_at,
-      updated_at
-    `)
-    .order("created_at", { ascending: false });
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("teacher_profiles")
+      .select(`
+        user_id,
+        first_name,
+        last_name,
+        phone,
+        address,
+        department,
+        qualification,
+        experience_years,
+        subjects_taught,
+        profile_photo_url,
+        created_at,
+        updated_at
+      `)
+      .order("created_at", { ascending: false });
 
-  if (error) {
-    console.error("❌ Error fetching teachers:", error);
-    throw new AppError("Failed to fetch teachers", 500);
+    if (error) {
+      // 42P01 = table doesn't exist - return empty array
+      if (error.code === "42P01") {
+        console.warn("ℹ️ teacher_profiles table not found, returning empty array");
+        return [];
+      }
+      console.error("❌ Error fetching teachers:", error);
+      throw new AppError(`Failed to fetch teachers: ${error.message || error.code || 'Unknown error'}`, 500);
+    }
+
+    if (!data || data.length === 0) {
+      return [];
+    }
+
+    // Fetch emails from auth.users (handle individual failures gracefully)
+    const teachersWithEmails = await Promise.allSettled(
+      data.map(async (teacher) => {
+        try {
+          const { data: userData } = await supabaseAdmin.auth.admin.getUserById(teacher.user_id);
+          return {
+            ...teacher,
+            email: userData?.user?.email || "N/A",
+            role: "teacher",
+            profile_complete: !!(teacher.first_name && teacher.last_name && teacher.department && teacher.qualification)
+          };
+        } catch (authError) {
+          // If auth lookup fails for one user, still return the teacher with N/A email
+          console.warn(`⚠️ Failed to fetch email for teacher ${teacher.user_id}:`, authError);
+          return {
+            ...teacher,
+            email: "N/A",
+            role: "teacher",
+            profile_complete: !!(teacher.first_name && teacher.last_name && teacher.department && teacher.qualification)
+          };
+        }
+      })
+    );
+
+    // Filter out any rejected promises and return fulfilled results
+    return teachersWithEmails
+      .filter((result) => result.status === "fulfilled")
+      .map((result) => result.value);
+  } catch (err) {
+    // If it's already an AppError, re-throw it
+    if (err instanceof AppError) {
+      throw err;
+    }
+    // For other errors, log and return empty array (non-fatal)
+    console.error("❌ Unexpected error in getAllTeachers:", err);
+    return [];
   }
-
-  // Fetch emails from auth.users
-  const teachersWithEmails = await Promise.all(
-    (data || []).map(async (teacher) => {
-      const { data: userData } = await supabaseAdmin.auth.admin.getUserById(teacher.user_id);
-
-      return {
-        ...teacher,
-        email: userData?.user?.email || "N/A",
-        role: "teacher",
-        profile_complete: !!(teacher.first_name && teacher.last_name && teacher.department && teacher.qualification)
-      };
-    })
-  );
-
-  return teachersWithEmails;
 };
 
 /**
@@ -1622,6 +2425,10 @@ export const uploadMarks = async (marksArray) => {
 
 export default {
   getUserRole,
+  getAdminOverview,
+  getAdminUsers,
+  updateUserRole,
+  updateUserStatus,
   getUserProfile,
   createStudent,
   getStudents,
@@ -1669,6 +2476,8 @@ export default {
   getNotifications,
   getAllStudents,
   getAllTeachers,
+  getAdminClasses,
+  getAdminAcademics,
   // New: Announcements
   createAnnouncement,
   getAnnouncementsByClass,
