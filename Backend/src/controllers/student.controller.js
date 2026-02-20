@@ -41,23 +41,53 @@ const resolveStudent = async (req) => {
 };
 
 // ============================================
+// HELPER: Attendance comment based on percentage
+// ============================================
+const getAttendanceComment = (pct) => {
+    if (pct >= 90) return "Excellent Attendance";
+    if (pct >= 75) return "Good, Keep Improving";
+    if (pct >= 60) return "Warning Zone";
+    return "Critical, Improve Immediately";
+};
+
+// ============================================
 // GET /api/student/marks
-// Get current student's marks
+// Get current student's marks (with teacher name)
 // ============================================
 export const getMyMarks = asyncHandler(async (req, res) => {
     const { studentId } = await resolveStudent(req);
 
     const marks = await supabaseService.getMarksByStudent(studentId);
 
+    // Batch-lookup teacher names from profiles
+    const uploaderIds = [...new Set(marks.filter(m => m.uploaded_by).map(m => m.uploaded_by))];
+    let teacherMap = {};
+    if (uploaderIds.length > 0) {
+        try {
+            const { data: profiles } = await supabase
+                .from("profiles")
+                .select("id, full_name")
+                .in("id", uploaderIds);
+            if (profiles) {
+                teacherMap = Object.fromEntries(profiles.map(p => [p.id, p.full_name]));
+            }
+        } catch { /* non-fatal */ }
+    }
+
+    const enrichedMarks = marks.map((m) => ({
+        ...m,
+        teacher_name: teacherMap[m.uploaded_by] || "Unknown Teacher",
+    }));
+
     // Compute summary stats
-    const totalMarks = marks.length;
+    const totalMarks = enrichedMarks.length;
     const avgScore = totalMarks > 0
-        ? marks.reduce((sum, m) => sum + (m.marks_obtained || 0), 0) / totalMarks
+        ? enrichedMarks.reduce((sum, m) => sum + (m.marks_obtained || 0), 0) / totalMarks
         : 0;
 
     res.status(200).json({
         success: true,
-        data: marks,
+        data: enrichedMarks,
         summary: {
             total: totalMarks,
             average: Math.round(avgScore * 100) / 100,
@@ -90,6 +120,161 @@ export const getMyAttendance = asyncHandler(async (req, res) => {
             late,
             absent,
             attendancePct,
+        },
+    });
+});
+
+// ============================================
+// GET /api/student/attendance/summary
+// Attendance summary with comment
+// ============================================
+export const getAttendanceSummary = asyncHandler(async (req, res) => {
+    const { studentId } = await resolveStudent(req);
+
+    const records = await supabaseService.getStudentAttendance(studentId);
+
+    const total = records.length;
+    const present = records.filter((r) => r.status === "present" || r.status === "late").length;
+    const percentage = total > 0 ? Math.round((present / total) * 100) : 0;
+    const comment = getAttendanceComment(percentage);
+
+    res.status(200).json({
+        success: true,
+        data: {
+            present,
+            total,
+            percentage,
+            comment,
+        },
+    });
+});
+
+// ============================================
+// GET /api/student/notifications
+// Combined notifications + announcements feed
+// ============================================
+export const getMyNotifications = asyncHandler(async (req, res) => {
+    const { studentId } = await resolveStudent(req);
+    const userId = req.user.id;
+
+    // Fetch personal notifications
+    let notifications = [];
+    try {
+        const { data, error } = await supabase
+            .from("notifications")
+            .select("id, title, message, type, is_read, created_at")
+            .eq("user_id", userId)
+            .order("created_at", { ascending: false })
+            .limit(50);
+        if (!error && data) {
+            notifications = data.map((n) => ({
+                ...n,
+                source: "notification",
+            }));
+        }
+    } catch { /* non-fatal */ }
+
+    // Fetch class announcements
+    let announcements = [];
+    try {
+        const announcementData = await supabaseService.getStudentAnnouncements(studentId);
+        announcements = (announcementData || []).map((a) => ({
+            id: a.id,
+            title: a.title,
+            message: a.body || a.message || "",
+            type: "announcement",
+            is_read: true, // Announcements have no read state
+            created_at: a.created_at,
+            source: "announcement",
+            class_name: a.classes?.name || null,
+        }));
+    } catch { /* non-fatal */ }
+
+    // Combine and sort by date
+    const combined = [...notifications, ...announcements]
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+        .slice(0, 50);
+
+    const unreadCount = combined.filter((n) => !n.is_read).length;
+
+    res.status(200).json({
+        success: true,
+        data: combined,
+        count: combined.length,
+        unreadCount,
+    });
+});
+
+// ============================================
+// GET /api/student/progress
+// Progress summary: avg marks, attendance %, standing, rank
+// ============================================
+export const getMyProgress = asyncHandler(async (req, res) => {
+    const { studentId } = await resolveStudent(req);
+
+    // Fetch marks
+    const marks = await supabaseService.getMarksByStudent(studentId);
+    const totalMarks = marks.length;
+    const avgMarks = totalMarks > 0
+        ? Math.round(marks.reduce((s, m) => s + (m.marks_obtained || 0), 0) / totalMarks * 100) / 100
+        : 0;
+
+    // Fetch attendance
+    const records = await supabaseService.getStudentAttendance(studentId);
+    const totalDays = records.length;
+    const presentDays = records.filter((r) => r.status === "present" || r.status === "late").length;
+    const attendancePct = totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 0;
+
+    // Standing based on combined score (60% marks + 40% attendance)
+    const combinedScore = Math.round(avgMarks * 0.6 + attendancePct * 0.4);
+    let standing;
+    if (combinedScore >= 85) standing = "Excellent";
+    else if (combinedScore >= 70) standing = "Good";
+    else if (combinedScore >= 50) standing = "Average";
+    else standing = "Needs Improvement";
+
+    // Basic rank estimate — count students with lower avg marks
+    let rankEstimate = null;
+    try {
+        const { data: allMarks, error } = await supabase
+            .from("marks")
+            .select("student_id, marks_obtained");
+        if (!error && allMarks && allMarks.length > 0) {
+            // Group by student and compute averages
+            const studentAvgs = {};
+            for (const m of allMarks) {
+                if (!studentAvgs[m.student_id]) studentAvgs[m.student_id] = { sum: 0, count: 0 };
+                studentAvgs[m.student_id].sum += m.marks_obtained || 0;
+                studentAvgs[m.student_id].count++;
+            }
+            const avgs = Object.entries(studentAvgs).map(([sid, v]) => ({
+                studentId: sid,
+                avg: v.sum / v.count,
+            }));
+            avgs.sort((a, b) => b.avg - a.avg);
+            const myRank = avgs.findIndex((a) => a.studentId === studentId) + 1;
+            const totalStudents = avgs.length;
+            if (myRank > 0) {
+                const percentile = Math.round(((totalStudents - myRank) / totalStudents) * 100);
+                rankEstimate = {
+                    rank: myRank,
+                    totalStudents,
+                    percentile,
+                };
+            }
+        }
+    } catch { /* non-fatal */ }
+
+    res.status(200).json({
+        success: true,
+        data: {
+            avgMarks,
+            attendancePct,
+            standing,
+            combinedScore,
+            rankEstimate,
+            totalExams: totalMarks,
+            totalClassDays: totalDays,
         },
     });
 });

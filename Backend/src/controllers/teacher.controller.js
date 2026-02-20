@@ -395,3 +395,48 @@ export const createExam = asyncHandler(async (req, res) => {
 
     res.status(201).json({ success: true, data });
 });
+
+// ============================================
+// GET /api/teacher/stats
+// Dashboard stats: total assigned students, total classes
+// ============================================
+export const getTeacherStats = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+    await ensureTeacher(userId);
+
+    // Get teacher's classes
+    const { data: teacherClasses, error: tcError } = await supabase
+        .from("teacher_classes")
+        .select("class_id")
+        .eq("teacher_id", userId);
+
+    if (tcError) {
+        console.error("❌ Error fetching teacher classes:", tcError);
+        throw new AppError("Failed to fetch teacher stats", 500);
+    }
+
+    const classIds = (teacherClasses || []).map((tc) => tc.class_id);
+    const totalClasses = classIds.length;
+
+    // Count distinct students enrolled in those classes
+    let totalStudents = 0;
+    if (classIds.length > 0) {
+        const { data: enrollments, error: enError } = await supabase
+            .from("enrollments")
+            .select("student_id")
+            .in("class_id", classIds);
+
+        if (!enError && enrollments) {
+            const uniqueStudents = new Set(enrollments.map((e) => e.student_id));
+            totalStudents = uniqueStudents.size;
+        }
+    }
+
+    res.status(200).json({
+        success: true,
+        data: {
+            totalClasses,
+            totalStudents,
+        },
+    });
+});

@@ -53,18 +53,22 @@ export default function TeacherDashboard() {
   useEffect(() => {
     const fetchDashboardData = async () => {
       try {
-        // Fetch classes to calculate stats
-        const classesRes = await api.get('/api/classes/teacher');
-        const classes = classesRes.data.data || [];
+        // Fetch real stats from backend
+        const [classesRes, statsRes] = await Promise.allSettled([
+          api.get('/api/classes/teacher'),
+          api.get('/api/teacher/stats'),
+        ]);
 
-        // Calculate total students (mock logic for now if backend doesn't aggregate)
-        const studentsCount = classes.reduce((acc: number, cls: any) => acc + (cls.student_count || 0), 0);
+        const classes = classesRes.status === 'fulfilled' ? (classesRes.value.data.data || []) : [];
+        const statsData = statsRes.status === 'fulfilled' && statsRes.value.data.success
+          ? statsRes.value.data.data
+          : null;
 
         setStats({
-          totalClasses: classes.length,
-          totalStudents: studentsCount,
+          totalClasses: statsData?.totalClasses ?? classes.length,
+          totalStudents: statsData?.totalStudents ?? classes.reduce((acc: number, cls: any) => acc + (cls.student_count || 0), 0),
           attendanceTaken: 0,
-          pendingtasks: 2
+          pendingtasks: 0,
         });
       } catch (error) {
         console.error("Failed to fetch dashboard data:", error);

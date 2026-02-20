@@ -546,6 +546,7 @@ export const getMarksByStudent = async (studentId) => {
       marks_obtained,
       subject:subjects(id, name),
       exam:exams(id, name, max_marks),
+      uploaded_by,
       created_at,
       updated_at
     `

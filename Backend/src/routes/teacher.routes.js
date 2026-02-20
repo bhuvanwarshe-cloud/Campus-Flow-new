@@ -46,4 +46,8 @@ router.get("/exams/:classId", teacherController.getExams);
 // POST /api/teacher/exams  { classId, name, maxMarks }
 router.post("/exams", teacherController.createExam);
 
+// ── Stats ─────────────────────────────────────────────────────────────────────
+// GET /api/teacher/stats
+router.get("/stats", teacherController.getTeacherStats);
+
 export default router;
