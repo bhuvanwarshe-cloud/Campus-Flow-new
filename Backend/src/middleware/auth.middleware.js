@@ -86,6 +86,7 @@ export const authMiddleware = async (req, res, next) => {
       id: user.id,
       email: user.email,
       emailConfirmed: user.email_confirmed_at,
+      token: token // Attach token for RLS propagation
     };
 
     // ====================================================================

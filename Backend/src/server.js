@@ -28,6 +28,8 @@ import notificationsRoutes from "./routes/notifications.routes.js";
 import uploadRoutes from "./routes/upload.routes.js";
 import teacherRoutes from "./routes/teacher.routes.js";
 import studentRoutes from "./routes/student.routes.js";
+import assignmentRoutes from "./routes/assignments.routes.js";
+import testRoutes from "./routes/tests.routes.js";
 
 // Initialize Express app
 const app = express();
@@ -221,6 +223,8 @@ app.use("/api/notifications", notificationsRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/teacher", teacherRoutes);
 app.use("/api/student", studentRoutes);
+app.use("/api/assignments", assignmentRoutes);
+app.use("/api/tests", testRoutes);
 
 // ============================================
 // 404 HANDLER

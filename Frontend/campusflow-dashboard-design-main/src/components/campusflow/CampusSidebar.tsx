@@ -11,10 +11,14 @@ import {
   Settings,
   Users,
   UsersRound,
+  FileText,
+  ClipboardList,
 } from "lucide-react";
 
 import { NavLink } from "@/components/NavLink";
 import { CampusLogo } from "@/components/campusflow/CampusLogo";
+import { useNotifications } from "@/contexts/NotificationContext";
+import { Badge } from "@/components/ui/badge";
 import {
   Sidebar,
   SidebarContent,
@@ -48,6 +52,8 @@ const teacherItems: NavItem[] = [
   { title: "My Classes", url: "/teacher/classes", icon: GraduationCap },
   { title: "Attendance", url: "/teacher/attendance", icon: CalendarCheck },
   { title: "Marks", url: "/teacher/marks", icon: Gauge },
+  { title: "Assignments", url: "/teacher/assignments", icon: FileText },
+  { title: "Weekly Tests", url: "/teacher/tests", icon: ClipboardList },
   { title: "Notifications", url: "/teacher/notifications", icon: BarChart3 },
 ];
 
@@ -56,18 +62,20 @@ const studentItems: NavItem[] = [
   { title: "My Courses", url: "/student/courses", icon: BookOpen },
   { title: "Marks", url: "/student/marks", icon: Gauge },
   { title: "Attendance", url: "/student/attendance", icon: CalendarCheck },
+  { title: "Assignments", url: "/student/assignments", icon: FileText },
+  { title: "Weekly Tests", url: "/student/tests", icon: ClipboardList },
   { title: "Notifications", url: "/student/notifications", icon: BarChart3 },
   { title: "AI Coach", url: "/student/ai-coach", icon: Brain },
 ];
 
 export function CampusSidebar({ role }: { role: CampusRole }) {
   const location = useLocation();
+  const { unreadCount } = useNotifications();
   const items = useMemo(() => {
     if (role === "teacher") return teacherItems;
     if (role === "student") return studentItems;
     return adminItems;
   }, [role]);
-
   const currentPath = location.pathname;
 
   return (
@@ -89,11 +97,14 @@ export function CampusSidebar({ role }: { role: CampusRole }) {
                     <NavLink
                       to={item.url}
                       end
-                      className=""
+                      className="relative"
                       activeClassName="bg-sidebar-accent text-sidebar-accent-foreground font-medium"
                     >
                       <Icon />
                       <span>{item.title}</span>
+                      {(item.title === "Notifications" || item.title === "Assignments" || item.title === "Weekly Tests") && unreadCount > 0 && (
+                        <span className="absolute right-2 top-1/2 -translate-y-1/2 flex h-2 w-2 rounded-full bg-brand2 animate-pulse" />
+                      )}
                     </NavLink>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

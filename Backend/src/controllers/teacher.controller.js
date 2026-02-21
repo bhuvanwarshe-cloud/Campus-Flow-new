@@ -11,6 +11,7 @@
 import supabaseService from "../services/supabase.service.js";
 import { supabase } from "../config/supabase.js";
 import { AppError, asyncHandler } from "../utils/errorHandler.js";
+import { sendClassNotification } from "../utils/notifications.js";
 
 // ============================================
 // HELPER: Verify teacher role
@@ -21,24 +22,6 @@ const ensureTeacher = async (userId) => {
         throw new AppError("Access denied. Teacher role required.", 403);
     }
     return role;
-};
-
-// ============================================
-// HELPER: Create notification (internal)
-// ============================================
-const sendNotification = async (userId, title, message, type = "info") => {
-    try {
-        const { error } = await supabase.from("notifications").insert([{
-            user_id: userId,
-            title,
-            message,
-            // 'type' column does not exist in notifications table — omitted
-            is_read: false,
-        }]);
-        if (error) console.warn("⚠️ Failed to send notification:", error.message);
-    } catch (e) {
-        console.warn("⚠️ Notification error (non-fatal):", e.message);
-    }
 };
 
 // ============================================
@@ -237,21 +220,13 @@ export const createAnnouncement = asyncHandler(async (req, res) => {
     });
 
     // Get all enrolled students and notify them
-    const { data: enrollments } = await supabase
-        .from("enrollments")
-        .select("student_id")
-        .eq("class_id", classId);
-
-    if (enrollments && enrollments.length > 0) {
-        for (const enrollment of enrollments) {
-            await sendNotification(
-                enrollment.student_id,
-                `📢 New Announcement`,
-                title.trim(),
-                "announcement"
-            );
-        }
-    }
+    await sendClassNotification({
+        classId,
+        title: `📢 New Announcement`,
+        message: title.trim(),
+        type: "announcement",
+        link: "/student/notifications"
+    });
 
     res.status(201).json({
         success: true,
