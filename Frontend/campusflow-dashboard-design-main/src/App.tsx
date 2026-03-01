@@ -6,8 +6,10 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import NotFound from "./pages/NotFound"; import Login from "./pages/Login";
+import NotFound from "./pages/NotFound";
+import Login from "./pages/Login";
 import Signup from "./pages/Signup";
+import AuthCallback from "./pages/AuthCallback";
 import Dashboard from "./pages/Dashboard";
 import ProfileComplete from "./pages/ProfileComplete";
 import ProfileView from "./pages/ProfileView";
@@ -41,6 +43,7 @@ const App = () => (
                 <Route path="/" element={<Navigate to="/login" replace />} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/signup" element={<Signup />} />
+                <Route path="/auth/callback" element={<AuthCallback />} />
 
                 {/* Protected routes */}
                 <Route
