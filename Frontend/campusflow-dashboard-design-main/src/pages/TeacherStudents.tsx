@@ -229,7 +229,7 @@ export default function TeacherStudents() {
                 {error && (
                     <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-800 px-4 py-3 text-red-700 dark:text-red-400">
                         <AlertCircle className="h-4 w-4 shrink-0" />
-                        <span className="text-sm">{error}</span>
+                        <span className="text-sm">{typeof error === "string" ? error : "An error occurred"}</span>
                     </div>
                 )}
 

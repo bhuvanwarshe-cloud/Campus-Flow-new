@@ -160,7 +160,7 @@ export function FileUpload({
                         {error && (
                             <div className="flex items-center gap-2 text-sm text-destructive">
                                 <AlertCircle className="h-4 w-4" />
-                                <span>{error}</span>
+                                <span>{typeof error === "string" ? error : "An error occurred"}</span>
                             </div>
                         )}
 

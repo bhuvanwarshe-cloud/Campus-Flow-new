@@ -220,7 +220,7 @@ export default function ProfileComplete() {
             console.error('Profile completion error:', error);
             toast({
                 title: "Error",
-                description: error.response?.data?.error || "Failed to complete profile",
+                description: error.response?.data?.error?.message || "Failed to complete profile",
                 variant: "destructive",
             });
         } finally {
@@ -497,3 +497,4 @@ export default function ProfileComplete() {
         </div>
     );
 }
+

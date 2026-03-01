@@ -11,7 +11,7 @@
 import supabaseService from "../services/supabase.service.js";
 import { supabase } from "../config/supabase.js";
 import { AppError, asyncHandler } from "../utils/errorHandler.js";
-import { sendClassNotification } from "../utils/notifications.js";
+import { sendClassNotification, sendUserNotification } from "../utils/notifications.js";
 
 // ============================================
 // HELPER: Verify teacher role
@@ -107,12 +107,11 @@ export const uploadMarks = asyncHandler(async (req, res) => {
         for (const m of marks) {
             try {
                 const notifyUserId = m.studentId;
-                await sendNotification(
-                    notifyUserId,
-                    "Marks Updated",
-                    `Your marks have been uploaded for the latest exam.`,
-                    "marks"
-                );
+                await sendUserNotification(notifyUserId, {
+                    title: "Marks Updated",
+                    message: "Your marks have been uploaded for the latest exam.",
+                    type: "marks"
+                });
             } catch (notifErr) {
                 console.warn("⚠️ Non-fatal notification error for student:", m.studentId, notifErr.message);
             }
@@ -175,12 +174,11 @@ export const recordAttendance = asyncHandler(async (req, res) => {
     // Notify absent students
     const absentStudents = attendance.filter((a) => a.status === "absent");
     for (const a of absentStudents) {
-        await sendNotification(
-            a.studentId,
-            "Attendance Marked",
-            `You were marked absent on ${attendanceDate}.`,
-            "attendance"
-        );
+        await sendUserNotification(a.studentId, {
+            title: "Attendance Marked",
+            message: `You were marked absent on ${attendanceDate}.`,
+            type: "attendance"
+        });
     }
 
     res.status(201).json({
@@ -290,12 +288,11 @@ export const createPerformanceReport = asyncHandler(async (req, res) => {
     });
 
     // Notify student
-    await sendNotification(
-        studentId,
-        "Performance Report Available",
-        `Your performance report for ${period} has been generated.`,
-        "performance"
-    );
+    await sendUserNotification(studentId, {
+        title: "Performance Report Available",
+        message: `Your performance report for ${period} has been generated.`,
+        type: "performance"
+    });
 
     res.status(201).json({
         success: true,

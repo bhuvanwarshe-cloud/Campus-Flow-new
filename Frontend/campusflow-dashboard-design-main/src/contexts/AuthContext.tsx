@@ -77,24 +77,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
             // Get profile for students and teachers
             try {
-                const profileResponse = await api.get('/api/profile');
-                const profileData = profileResponse.data.data;
-
-                setProfile({
-                    id: userId,
-                    email: profileData.email || user?.email || '',
-                    role: role,
-                    firstName: profileData.first_name,
-                    lastName: profileData.last_name,
-                    phone: profileData.phone,
-                    address: profileData.address,
-                    profilePhoto: profileData.profile_photo,
-                    isProfileComplete: profileData.is_complete,
+                const profileResponse = await api.get('/api/profile', {
+                    validateStatus: (status) => status >= 200 && status < 500, // Prevent 404 console errors
                 });
-            } catch (profileError: any) {
-                // If profile not found (404), it means user hasn't completed profile yet
-                if (profileError.response?.status === 404) {
-                    console.log('Profile not found - new user');
+
+                if (profileResponse.status === 404) {
+                    console.log('Profile not found - redirecting to setup');
                     setProfile({
                         id: userId,
                         email: user?.email || '',
@@ -102,8 +90,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                         isProfileComplete: false,
                     });
                 } else {
-                    throw profileError;
+                    const profileData = profileResponse.data.data;
+
+                    const sd = profileData.roleSpecificData || {};
+
+                    setProfile({
+                        id: userId,
+                        email: profileData.email || user?.email || '',
+                        role: role,
+                        firstName: profileData.first_name,
+                        lastName: profileData.last_name,
+                        phone: profileData.phone,
+                        address: profileData.address,
+                        profilePhoto: profileData.profile_picture_url,
+                        isProfileComplete: profileData.is_profile_complete,
+
+                        // Map Student Specific Data
+                        ...(role === 'student' && {
+                            branch: sd.branch,
+                            degree: sd.degree,
+                            registrationNumber: sd.registration_number,
+                            admissionYear: sd.admission_year,
+                        }),
+
+                        // Map Teacher Specific Data
+                        ...(role === 'teacher' && {
+                            subjects: sd.subjects_taught ? sd.subjects_taught.join(', ') : '',
+                            department: sd.department,
+                            qualification: sd.qualification,
+                            yearsOfExperience: sd.experience_years,
+                        }),
+                    });
                 }
+            } catch (profileError: any) {
+                console.error('Unexpected profile error:', profileError);
+                throw profileError;
             }
             setProfileLoading(false);
         } catch (error: any) {

@@ -50,133 +50,100 @@ export const upsertProfile = asyncHandler(async (req, res) => {
     address,
     date_of_birth,
     profile_photo,
-    // Student fields
     branch,
     degree,
     registration_number,
     admission_year,
-    // Teacher fields
     subjects,
     department,
     qualification,
     years_of_experience,
   } = req.body;
 
-  // Get user role from database
   const userRole = await supabaseService.getUserRole(userId);
-
-  // Admins cannot create/update profiles
   if (userRole === "admin") {
     throw new AppError("Admins do not have profiles", 403);
   }
 
-  // Check if profile exists
-  const { data: existingProfile } = await supabase
-    .from("profiles")
-    .select("id")
-    .eq("user_id", userId)
-    .single();
+  // Helper to robustly upsert across fragmented schemas:
+  const robustUpsert = async (table, payload) => {
+    // 1. Try Update using user_id
+    const { data: u1, error: e1 } = await supabase.from(table).update(payload).eq("user_id", userId).select();
+    if (u1 && u1.length > 0) return u1[0];
+
+    // 2. Try Update using id (fallback for profiles table)
+    const { data: u2, error: e2 } = await supabase.from(table).update(payload).eq("id", userId).select();
+    if (u2 && u2.length > 0) return u2[0];
+
+    // 3. Fallback to Insert: Supply BOTH id and user_id to satisfy whichever PK constraint won in schema
+    const insertPayload = { ...payload, user_id: userId, id: userId };
+    const { data: i1, error: ie1 } = await supabase.from(table).insert(insertPayload).select();
+    if (ie1) {
+      if (ie1.code === "23505") { // duplicate key but we missed it?
+        console.error(`Duplicate key during insert on ${table} even after update attempts. Weird schema state.`);
+      } else if (ie1.code === "42703" && ie1.message.includes("column \"id\" of relation")) {
+        // Table doesn't have an "id" column, only user_id (e.g. teacher_profiles). Retry without "id"
+        delete insertPayload.id;
+        const { data: i2, error: ie2 } = await supabase.from(table).insert(insertPayload).select();
+        if (ie2) throw ie2;
+        return i2 ? i2[0] : null;
+      } else {
+        throw ie1;
+      }
+    }
+    return i1 ? i1[0] : null;
+  };
+
+  // --- Base profile
+  const profilePayload = { is_profile_complete: true };
+  if (first_name !== undefined) profilePayload.first_name = first_name;
+  if (last_name !== undefined) profilePayload.last_name = last_name;
+  if (phone !== undefined) profilePayload.phone = phone;
+  if (address !== undefined) profilePayload.address = address;
+  if (date_of_birth !== undefined) profilePayload.dob = date_of_birth;
+  if (profile_photo !== undefined) profilePayload.profile_picture_url = profile_photo;
 
   let updatedProfile;
-
-  if (!existingProfile) {
-    // CREATE NEW PROFILE
-    // Validate required fields for creation
-    if (!first_name || !last_name) {
-      throw new AppError("First name and last name are required for new profiles", 400);
-    }
-
-    const { data: created, error: createError } = await supabase
-      .from("profiles")
-      .insert({
-        user_id: userId,
-        email: req.user.email, // Ensure email is captured
-        first_name,
-        last_name,
-        phone,
-        address,
-        date_of_birth,
-        profile_photo,
-        is_complete: true,
-      })
-      .select()
-      .single();
-
-    if (createError) {
-      throw new AppError(`Failed to create profile: ${createError.message}`, 500);
-    }
-    updatedProfile = created;
-  } else {
-    // UPDATE EXISTING PROFILE
-    // Build update object dynamically to allow partial updates
-    const updates = { is_complete: true };
-    if (first_name !== undefined) updates.first_name = first_name;
-    if (last_name !== undefined) updates.last_name = last_name;
-    if (phone !== undefined) updates.phone = phone;
-    if (address !== undefined) updates.address = address;
-    if (date_of_birth !== undefined) updates.date_of_birth = date_of_birth;
-    if (profile_photo !== undefined) updates.profile_photo = profile_photo;
-
-    const { data: updated, error: updateError } = await supabase
-      .from("profiles")
-      .update(updates)
-      .eq("user_id", userId)
-      .select()
-      .single();
-
-    if (updateError) {
-      throw new AppError(`Failed to update profile: ${updateError.message}`, 500);
-    }
-    updatedProfile = updated;
+  try {
+    updatedProfile = await robustUpsert("profiles", profilePayload);
+  } catch (err) {
+    throw new AppError(`Failed to save base profile: ${err.message}`, 500);
   }
 
-  // Handle Role-Specific Data (Upsert logic)
+  // --- Student-specific
   if (userRole === "student") {
-    const { data: existingStudent } = await supabase.from("student_profiles").select("id").eq("user_id", userId).single();
+    const studentPayload = {};
+    if (branch !== undefined) studentPayload.branch = branch;
+    if (degree !== undefined) studentPayload.degree = degree;
+    if (registration_number !== undefined) studentPayload.registration_number = registration_number;
+    if (admission_year !== undefined) studentPayload.admission_year = admission_year ? parseInt(admission_year) : null;
 
-    // Filter undefined fields to allow partial updates
-    const studentUpdates = {};
-    if (branch !== undefined) studentUpdates.branch = branch;
-    if (degree !== undefined) studentUpdates.degree = degree;
-    if (registration_number !== undefined) studentUpdates.registration_number = registration_number;
-    if (admission_year !== undefined) studentUpdates.admission_year = admission_year ? parseInt(admission_year) : null;
-
-    if (existingStudent) {
-      if (Object.keys(studentUpdates).length > 0) {
-        await supabase.from("student_profiles").update(studentUpdates).eq("user_id", userId);
+    if (Object.keys(studentPayload).length > 0) {
+      try { await robustUpsert("student_profiles", studentPayload); } catch (e) {
+        console.error("Student profile sync error:", e.message);
       }
-    } else {
-      // For new student profile, ensure required fields or insert what we have
-      await supabase.from("student_profiles").insert({
-        user_id: userId,
-        ...studentUpdates
-      });
     }
-  } else if (userRole === "teacher") {
-    const { data: existingTeacher } = await supabase.from("teacher_profiles").select("id").eq("user_id", userId).single();
+  }
 
-    const teacherUpdates = {};
-    if (subjects !== undefined) teacherUpdates.subjects = subjects;
-    if (department !== undefined) teacherUpdates.department = department;
-    if (qualification !== undefined) teacherUpdates.qualification = qualification;
-    if (years_of_experience !== undefined) teacherUpdates.years_of_experience = years_of_experience ? parseInt(years_of_experience) : null;
+  // --- Teacher-specific
+  if (userRole === "teacher") {
+    const teacherPayload = {};
+    if (subjects !== undefined) teacherPayload.subjects_taught = Array.isArray(subjects) ? subjects : (typeof subjects === "string" ? subjects.split(",").map(s => s.trim()) : []);
+    if (department !== undefined) teacherPayload.department = department;
+    if (qualification !== undefined) teacherPayload.qualification = qualification;
+    if (years_of_experience !== undefined) teacherPayload.experience_years = years_of_experience ? parseInt(years_of_experience) : null;
 
-    if (existingTeacher) {
-      if (Object.keys(teacherUpdates).length > 0) {
-        await supabase.from("teacher_profiles").update(teacherUpdates).eq("user_id", userId);
+    if (Object.keys(teacherPayload).length > 0) {
+      try { await robustUpsert("teacher_profiles", teacherPayload); } catch (e) {
+        console.error("Teacher profile sync error:", e.message);
       }
-    } else {
-      await supabase.from("teacher_profiles").insert({
-        user_id: userId,
-        ...teacherUpdates
-      });
     }
   }
 
   res.status(200).json({
     success: true,
     data: updatedProfile,
-    message: existingProfile ? "Profile updated successfully" : "Profile created successfully",
+    message: "Profile saved successfully",
   });
 });
 
@@ -238,14 +205,13 @@ export const completeProfile = asyncHandler(async (req, res) => {
     .from("profiles")
     .insert({
       user_id,
-      email,
       first_name,
       last_name,
       phone,
       address,
-      date_of_birth,
-      profile_photo,
-      is_complete: true,
+      dob: date_of_birth,
+      profile_picture_url: profile_photo,
+      is_profile_complete: true,
     })
     .select()
     .single();
@@ -277,10 +243,10 @@ export const completeProfile = asyncHandler(async (req, res) => {
       .from("teacher_profiles")
       .insert({
         user_id,
-        subjects,
+        subjects_taught: Array.isArray(subjects) ? subjects : (typeof subjects === 'string' ? subjects.split(',').map(s => s.trim()) : []),
         department,
         qualification,
-        years_of_experience: years_of_experience
+        experience_years: years_of_experience
           ? parseInt(years_of_experience)
           : null,
       });

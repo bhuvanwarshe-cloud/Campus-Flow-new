@@ -212,7 +212,7 @@ export default function AdminUsers() {
                   ) : error ? (
                     <TableRow>
                       <TableCell colSpan={5} className="py-8 text-center">
-                        <p className="text-sm text-destructive">{error}</p>
+                        <p className="text-sm text-destructive">{typeof error === "string" ? error : "An error occurred"}</p>
                       </TableCell>
                     </TableRow>
                   ) : users.length === 0 ? (
