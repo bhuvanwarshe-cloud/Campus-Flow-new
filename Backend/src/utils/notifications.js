@@ -1,16 +1,17 @@
 import { supabase as supabaseAdmin } from "../config/supabase.js";
 
 /**
- * Send a notification to all students enrolled in a specific class
- * 
+ * Send a notification to all students enrolled in a specific class.
+ *
  * @param {Object} options
- * @param {string} options.classId - The ID of the class
- * @param {string} options.title - Notification title
- * @param {string} options.message - Notification body
- * @param {string} options.type - Type of notification (assignment, test, announcement)
- * @param {string} options.link - Optional link for the frontend to navigate to
+ * @param {string} options.classId   - The ID of the class
+ * @param {string} options.title     - Notification title
+ * @param {string} options.message   - Notification body
+ * @param {string} options.type      - Type: assignment | test | announcement | marks | attendance | info
+ * @param {string} [options.link]    - Optional frontend navigation link
+ * @param {string} [options.entityId] - Optional UUID of the triggering entity
  */
-export const sendClassNotification = async ({ classId, title, message, type, link }) => {
+export const sendClassNotification = async ({ classId, title, message, type, link, entityId }) => {
     try {
         if (!classId) return;
 
@@ -37,11 +38,11 @@ export const sendClassNotification = async ({ classId, title, message, type, lin
             message,
             type: type || 'info',
             link: link || null,
+            entity_id: entityId || null,
             is_read: false
         }));
 
-        // 3. Prevent duplicate notifications (Optional logic, usually handled by checking recently sent same title/type)
-        // For now, we perform a direct bulk insert.
+        // 3. Bulk insert
         const { error: insertError } = await supabaseAdmin
             .from("notifications")
             .insert(notifications);
@@ -49,7 +50,7 @@ export const sendClassNotification = async ({ classId, title, message, type, lin
         if (insertError) {
             console.error("❌ Failed to insert bulk notifications:", insertError.message);
         } else {
-            console.log(`✅ Sent ${notifications.length} notifications of type '${type}'`);
+            console.log(`✅ Sent ${notifications.length} notifications of type '${type}' to class ${classId}`);
         }
     } catch (err) {
         console.error("⚠️ Unexpected error in sendClassNotification:", err.message);
@@ -57,9 +58,17 @@ export const sendClassNotification = async ({ classId, title, message, type, lin
 };
 
 /**
- * Send a notification to a specific user
+ * Send a notification to a specific user.
+ *
+ * @param {string} userId
+ * @param {Object} payload
+ * @param {string} payload.title
+ * @param {string} payload.message
+ * @param {string} [payload.type]
+ * @param {string} [payload.link]
+ * @param {string} [payload.entityId]
  */
-export const sendUserNotification = async (userId, { title, message, type, link }) => {
+export const sendUserNotification = async (userId, { title, message, type, link, entityId }) => {
     try {
         const { error } = await supabaseAdmin.from("notifications").insert([{
             user_id: userId,
@@ -67,6 +76,7 @@ export const sendUserNotification = async (userId, { title, message, type, link 
             message,
             type: type || 'info',
             link: link || null,
+            entity_id: entityId || null,
             is_read: false
         }]);
 

@@ -145,27 +145,22 @@ export const addQuestions = asyncHandler(async (req, res) => {
         throw new AppError(error.message, 500);
     }
 
-    // Notify students that the test is published/updated
-    const { data: testDetails } = await supabase
+    // Notify students that new questions are available for the test
+    const { data: testDetails } = await supabaseAdmin
         .from("mcq_tests")
         .select("title, class_id")
         .eq("id", id)
         .single();
 
-    const { data: enrollments } = await supabase
-        .from("enrollments")
-        .select("student_id")
-        .eq("class_id", testDetails.class_id);
-
-    if (enrollments) {
-        for (const enrollment of enrollments) {
-            await supabase.from("notifications").insert([{
-                user_id: enrollment.student_id,
-                title: "New Test Published",
-                message: `${testDetails.title} is now available.`,
-                is_read: false
-            }]);
-        }
+    if (testDetails) {
+        await sendClassNotification({
+            classId: testDetails.class_id,
+            title: "🧪 Test Updated",
+            message: `"${testDetails.title}" now has questions — get ready!`,
+            type: "test",
+            link: "/student/tests",
+            entityId: id
+        });
     }
 
     res.status(201).json({

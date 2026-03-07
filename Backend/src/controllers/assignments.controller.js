@@ -87,22 +87,15 @@ export const createAssignment = asyncHandler(async (req, res) => {
         throw new AppError(error.message, 500);
     }
 
-    // Notify students of the new assignment
-    const { data: enrollments } = await supabase
-        .from("enrollments")
-        .select("student_id")
-        .eq("class_id", classId);
-
-    if (enrollments && enrollments.length > 0) {
-        for (const enrollment of enrollments) {
-            await supabase.from("notifications").insert([{
-                user_id: enrollment.student_id,
-                title: "New Assignment",
-                message: `Task: ${title}`,
-                is_read: false
-            }]);
-        }
-    }
+    // Notify all enrolled students about the new assignment
+    await sendClassNotification({
+        classId,
+        title: "📝 New Assignment",
+        message: `${title}${description ? ` – ${description.slice(0, 80)}` : ''}`,
+        type: "assignment",
+        link: "/student/assignments",
+        entityId: data.id
+    });
 
     res.status(201).json({
         success: true,

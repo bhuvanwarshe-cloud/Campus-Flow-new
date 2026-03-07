@@ -27,7 +27,7 @@ interface NotificationContextType {
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
 
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
-    const { profile, user } = useAuth();
+    const { user } = useAuth();
     const [notifications, setNotifications] = useState<CampusNotification[]>([]);
     const [unreadCount, setUnreadCount] = useState(0);
     const [loading, setLoading] = useState(false);
