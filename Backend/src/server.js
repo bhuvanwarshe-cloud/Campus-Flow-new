@@ -47,7 +47,8 @@ app.use(
       "http://localhost:8080",
       "http://127.0.0.1:5173",
       "http://localhost:5173",
-      "http://localhost:5100" // For local testing
+      "http://localhost:5100",            // For local testing
+      "https://campusflow-app.vercel.app" // Production frontend
     ],
     credentials: true,
   })
