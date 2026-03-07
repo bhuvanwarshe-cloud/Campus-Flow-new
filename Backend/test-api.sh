@@ -6,7 +6,7 @@
 # ============================================
 
 # Configuration
-BASE_URL="http://localhost:5000"
+BASE_URL="http://localhost:5100"
 TOKEN="YOUR_JWT_TOKEN_HERE"
 
 # Colors for output

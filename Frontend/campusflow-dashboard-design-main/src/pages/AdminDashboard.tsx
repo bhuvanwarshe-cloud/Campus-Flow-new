@@ -16,6 +16,7 @@ import { CampusShell } from "@/components/campusflow/CampusShell";
 import { StatCard } from "@/components/campusflow/StatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/contexts/AuthContext";
+import { useProfile } from "@/contexts/ProfileContext";
 import api from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useRealtime } from "@/hooks/useRealtime";
@@ -34,7 +35,7 @@ interface AdminOverviewResponse {
 }
 
 export default function AdminDashboard() {
-  const { profile } = useAuth();
+  const { profile } = useProfile();
 
   const [overview, setOverview] = useState<AdminOverviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -79,8 +80,8 @@ export default function AdminDashboard() {
         if (isMountedRef.current) {
           setError(
             err?.response?.data?.error?.message ||
-              err?.message ||
-              "Failed to load admin overview"
+            err?.message ||
+            "Failed to load admin overview"
           );
         }
       } finally {
@@ -100,8 +101,9 @@ export default function AdminDashboard() {
     fetchOverview();
   }, [fetchOverview]);
 
-  // Realtime updates: when core tables change, refresh overview in the background.
-  const realtimeEnabled = true;
+  // Realtime updates are disabled by default to prevent WebSocket connection errors in the console.
+  // To use this, go to your Supabase Dashboard -> Database -> Replication and enable Realtime for these tables.
+  const realtimeEnabled = false;
 
   useRealtime({
     table: "profiles", // app-level users
@@ -151,10 +153,10 @@ export default function AdminDashboard() {
     () =>
       overview
         ? [
-            { label: "Students", value: overview.totals.students },
-            { label: "Teachers", value: overview.totals.teachers },
-            { label: "Classes", value: overview.totals.classes },
-          ]
+          { label: "Students", value: overview.totals.students },
+          { label: "Teachers", value: overview.totals.teachers },
+          { label: "Classes", value: overview.totals.classes },
+        ]
         : [],
     [overview]
   );
@@ -377,8 +379,8 @@ function Insight({
     tone === "ai"
       ? "bg-ai/10 text-ai"
       : tone === "brand2"
-      ? "bg-brand2/10 text-brand2"
-      : "bg-secondary text-secondary-foreground";
+        ? "bg-brand2/10 text-brand2"
+        : "bg-secondary text-secondary-foreground";
   return (
     <div className="rounded-xl border bg-card p-4 shadow-soft">
       <div className="flex items-center justify-between gap-3">

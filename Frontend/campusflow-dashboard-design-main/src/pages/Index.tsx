@@ -1,9 +1,11 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { useProfile } from "@/contexts/ProfileContext";
 
 const Index = () => {
-  const { user, profile, loading } = useAuth();
+  const { user, loading } = useAuth();
+  const { profile } = useProfile();
   const navigate = useNavigate();
 
   useEffect(() => {

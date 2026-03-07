@@ -2,11 +2,11 @@ import { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { CampusShell } from "@/components/campusflow/CampusShell";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { useAuth } from "@/contexts/AuthContext";
+import { useProfile } from "@/contexts/ProfileContext";
 
 export default function TeacherClassDetails() {
     const { classId } = useParams();
-    const { profile } = useAuth();
+    const { profile } = useProfile();
 
     return (
         <CampusShell role="teacher" title="Class Details" user={{ name: profile?.firstName || "", role: "Teacher" }}>

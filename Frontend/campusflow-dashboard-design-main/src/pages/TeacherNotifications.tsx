@@ -5,14 +5,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useAuth } from "@/contexts/AuthContext";
+import { useProfile } from "@/contexts/ProfileContext";
 import { useToast } from "@/hooks/use-toast";
 import api from "@/lib/api";
 import { Send, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 export default function TeacherNotifications() {
-    const { profile } = useAuth();
+    const { profile } = useProfile();
     const { toast } = useToast();
     const [classes, setClasses] = useState<any[]>([]);
     const [selectedClassId, setSelectedClassId] = useState("");

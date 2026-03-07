@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/contexts/AuthContext";
+import { useProfile } from "@/contexts/ProfileContext";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
@@ -49,7 +50,8 @@ export default function Signup() {
     const [step, setStep] = useState(1);
     const [isLoading, setIsLoading] = useState(false);
     const [photoPreview, setPhotoPreview] = useState<string | null>(null);
-    const { user, profile } = useAuth();
+    const { user } = useAuth();
+    const { profile } = useProfile();
     const navigate = useNavigate();
     const { toast } = useToast();
 

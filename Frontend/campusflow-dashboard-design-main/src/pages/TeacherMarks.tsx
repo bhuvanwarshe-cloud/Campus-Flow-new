@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { useAuth } from "@/contexts/AuthContext";
+import { useProfile } from "@/contexts/ProfileContext";
 import { useToast } from "@/hooks/use-toast";
 import { useRealtime } from "@/hooks/useRealtime";
 import api from "@/lib/api";
@@ -18,7 +18,7 @@ interface Exam { id: string; name: string; max_marks: number; }
 interface Subject { id: string; name: string; }
 
 export default function TeacherMarks() {
-    const { profile } = useAuth();
+    const { profile } = useProfile();
     const { toast } = useToast();
 
     const [classes, setClasses] = useState<ClassItem[]>([]);

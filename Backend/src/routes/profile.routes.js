@@ -34,11 +34,14 @@ const upload = multer({
   },
 });
 
-// Public route for signup profile completion (no auth required)
-router.post("/complete", completeProfile);
+// Public routes
+// (none currently, profile completion requires auth)
 
 // Apply auth middleware to all routes below
 router.use(authMiddleware);
+
+// Profile completion for signup
+router.post("/complete", completeProfile);
 
 // Get current user's profile
 router.get("/me", getMyProfile);
@@ -49,10 +52,10 @@ router.post("/", upsertProfile);
 router.put("/", upsertProfile);
 
 // Upload profile photo
-router.post("/photo", upload.single("photo"), uploadProfilePhoto);
+router.post("/avatar", upload.single("avatar"), uploadProfilePhoto);
 
 // Delete profile photo
-router.delete("/photo", deleteProfilePhoto);
+router.delete("/avatar", deleteProfilePhoto);
 
 // Update student-specific profile
 router.put("/student", updateStudentProfile);

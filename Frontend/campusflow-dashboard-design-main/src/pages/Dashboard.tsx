@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useProfile } from '@/contexts/ProfileContext';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -9,18 +10,14 @@ import TeacherDashboard from './TeacherDashboard';
 import StudentDashboard from './StudentDashboard';
 
 export default function Dashboard() {
-    const { user, profile, refreshProfile, profileLoading, roleLoading } = useAuth();
+    const { user } = useAuth();
+    const { profile, refreshProfile, loadingProfile } = useProfile();
     const navigate = useNavigate();
 
-    // Trigger profile fetch when dashboard loads
-    useEffect(() => {
-        if (user && !profile && !profileLoading && !roleLoading) {
-            refreshProfile();
-        }
-    }, [user, profile, profileLoading, roleLoading, refreshProfile]);
+    // Profile initialization is natively handled globally by AuthContext
 
     // Show loading while role/profile is being fetched
-    if (profileLoading || roleLoading || !profile) {
+    if (loadingProfile || !profile) {
         return (
             <div className="flex min-h-screen items-center justify-center bg-background">
                 <div className="text-center">

@@ -1,7 +1,9 @@
 import { User } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { useProfile } from "@/contexts/ProfileContext";
 import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,6 +16,7 @@ import { useToast } from "@/hooks/use-toast";
 
 export function UserMenu({ name, role }: { name: string; role: string }) {
   const { signOut } = useAuth();
+  const { profile } = useProfile();
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -34,13 +37,23 @@ export function UserMenu({ name, role }: { name: string; role: string }) {
     }
   };
 
+  const getInitials = (nameStr: string) => {
+    if (!nameStr) return "U";
+    return nameStr.split(" ").map((n) => n[0]).join("").substring(0, 2).toUpperCase();
+  };
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" className="h-9 gap-2 rounded-full px-2">
-          <span className="grid h-7 w-7 place-items-center rounded-full bg-secondary text-secondary-foreground">
-            <User className="h-4 w-4" />
-          </span>
+          <Avatar className="h-7 w-7">
+            {profile?.profilePhoto && (
+              <AvatarImage src={`${profile.profilePhoto}?t=${Date.now()}`} alt={name} />
+            )}
+            <AvatarFallback className="bg-secondary text-secondary-foreground text-xs">
+              {getInitials(name)}
+            </AvatarFallback>
+          </Avatar>
           <span className="hidden text-sm font-medium md:inline">{name}</span>
         </Button>
       </DropdownMenuTrigger>

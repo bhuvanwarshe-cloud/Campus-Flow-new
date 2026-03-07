@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
+import { useProfile } from "@/contexts/ProfileContext";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
@@ -18,7 +19,8 @@ interface ProfileFormData {
 }
 
 export default function ProfileView() {
-    const { user, profile, refreshProfile, loading, profileLoading } = useAuth();
+    const { user, loading } = useAuth();
+    const { profile, refreshProfile, loadingProfile } = useProfile();
     const { toast } = useToast();
     const [isEditing, setIsEditing] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
@@ -61,27 +63,31 @@ export default function ProfileView() {
         }
     };
 
-    const uploadProfilePhoto = async (userId: string): Promise<string | null> => {
+    const uploadProfilePhoto = async (): Promise<string | null> => {
         if (!formData.profilePhoto) return profile?.profilePhoto || null;
 
         try {
-            const fileExt = formData.profilePhoto.name.split('.').pop();
-            const fileName = `${userId}-${Date.now()}.${fileExt}`;
-            const filePath = `profile-photos/${fileName}`;
+            const formDataUpload = new FormData();
+            formDataUpload.append("avatar", formData.profilePhoto);
 
-            const { error: uploadError } = await supabase.storage
-                .from('profile-photos')
-                .upload(filePath, formData.profilePhoto, { upsert: true });
+            const response = await api.post(
+                "/api/profile/avatar",
+                formDataUpload,
+                {
+                    headers: {
+                        "Content-Type": "multipart/form-data",
+                    },
+                }
+            );
 
-            if (uploadError) throw uploadError;
-
-            const { data: { publicUrl } } = supabase.storage
-                .from('profile-photos')
-                .getPublicUrl(filePath);
-
-            return publicUrl;
-        } catch (error) {
-            console.error('Photo upload error:', error);
+            return response.data.avatar_url;
+        } catch (error: any) {
+            console.error("Photo upload error:", error?.response?.data || error);
+            toast({
+                title: "Upload failed",
+                description: error?.response?.data?.error || "Could not upload profile picture",
+                variant: "destructive",
+            });
             return null;
         }
     };
@@ -91,20 +97,32 @@ export default function ProfileView() {
         setIsSaving(true);
 
         try {
-            const photoUrl = await uploadProfilePhoto(user.id);
+            // Upload photo if a new one is selected
+            let photoUrl = profile.profilePhoto;
+            if (formData.profilePhoto) {
+                const uploadedUrl = await uploadProfilePhoto();
+                if (uploadedUrl) photoUrl = uploadedUrl;
+            }
 
             // Only send the fields that are allowed to change
             const updateData: any = {
                 phone: formData.phone,
                 address: formData.address,
-                profile_photo: photoUrl,
+                avatar_url: photoUrl,
             };
 
+            // Call PUT /api/profile/edit (mapped to UPSERT in the backend controller earlier)
             await api.put('/api/profile', updateData);
 
+            // Refetch fresh profile data mapped by the new backend logic
             await refreshProfile();
 
             setIsEditing(false);
+            setFormData(prev => ({ ...prev, profilePhoto: null }));
+            // Keep showing the new photo — set preview to the uploaded URL
+            if (photoUrl) setPhotoPreview(photoUrl);
+            else setPhotoPreview(null);
+
             toast({
                 title: "Success",
                 description: "Profile updated successfully",
@@ -121,15 +139,26 @@ export default function ProfileView() {
         }
     };
 
-    if (loading || profileLoading) {
+    if (loading || loadingProfile) {
         return (
             <div className="flex h-[50vh] items-center justify-center">
-                <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
+                <div className="flex flex-col items-center gap-4">
+                    <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
+                    <p className="text-sm text-muted-foreground">Loading profile data...</p>
+                </div>
             </div>
         );
     }
 
-    if (!profile) return null;
+    if (!profile) {
+        // Fallback for edge cases where the session resolves but no database profile is detected.
+        return (
+            <div className="flex h-[50vh] items-center justify-center flex-col gap-4">
+                <h2 className="text-xl font-semibold text-destructive">Profile Error</h2>
+                <p className="text-muted-foreground">Failed to locate profile data.</p>
+            </div>
+        )
+    }
 
     return (
         <div className="container py-8 max-w-4xl mx-auto space-y-8">
@@ -160,9 +189,13 @@ export default function ProfileView() {
                     <CardContent className="flex flex-col items-center gap-4">
                         <div className="relative group">
                             <Avatar className="h-40 w-40 border-4 border-background shadow-xl">
-                                <AvatarImage src={photoPreview || ""} />
+                                <AvatarImage
+                                    key={photoPreview || profile.profilePhoto || "fallback"}
+                                    src={photoPreview || profile.profilePhoto || ""}
+                                    alt="Profile picture"
+                                />
                                 <AvatarFallback className="text-4xl bg-primary/10 text-primary">
-                                    {profile.firstName?.[0]}{profile.lastName?.[0]}
+                                    {profile.firstName?.[0] || ""}{profile.lastName?.[0] || ""}
                                 </AvatarFallback>
                             </Avatar>
                             {isEditing && (

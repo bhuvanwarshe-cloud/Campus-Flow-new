@@ -30,6 +30,7 @@ import teacherRoutes from "./routes/teacher.routes.js";
 import studentRoutes from "./routes/student.routes.js";
 import assignmentRoutes from "./routes/assignments.routes.js";
 import testRoutes from "./routes/tests.routes.js";
+import analyticsRoutes from "./routes/analytics.routes.js";
 
 // Initialize Express app
 const app = express();
@@ -42,11 +43,12 @@ const app = express();
 // Updated to a robust configuration for deployment (Vercel -> Render)
 app.use(
   cors({
-    origin: function (origin, callback) {
-      // Temporarily allow all origins to prevent deployment "Failed to fetch" errors.
-      // In strict production, replace this with specific Vercel URL checks.
-      return callback(null, true);
-    },
+    origin: [
+      "http://localhost:8080",
+      "http://127.0.0.1:5173",
+      "http://localhost:5173",
+      "http://localhost:5100" // For local testing
+    ],
     credentials: true,
   })
 );
@@ -221,6 +223,7 @@ app.use("/api/teacher", teacherRoutes);
 app.use("/api/student", studentRoutes);
 app.use("/api/assignments", assignmentRoutes);
 app.use("/api/tests", testRoutes);
+app.use("/api/analytics", analyticsRoutes);
 
 // ============================================
 // 404 HANDLER

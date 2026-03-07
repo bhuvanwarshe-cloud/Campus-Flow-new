@@ -5,7 +5,7 @@
  * Tests all backend endpoints to verify routing
  */
 
-const BASE_URL = 'http://localhost:5000';
+const BASE_URL = 'http://localhost:5100';
 
 async function testRoute(method, endpoint, headers = {}, body = null) {
   const url = `${BASE_URL}${endpoint}`;
@@ -16,7 +16,7 @@ async function testRoute(method, endpoint, headers = {}, body = null) {
       ...headers,
     },
   };
-  
+
   if (body) {
     options.body = JSON.stringify(body);
   }
@@ -24,7 +24,7 @@ async function testRoute(method, endpoint, headers = {}, body = null) {
   try {
     const response = await fetch(url, options);
     const data = await response.json();
-    
+
     return {
       status: response.status,
       ok: response.ok,
@@ -88,12 +88,12 @@ async function runTests() {
     console.log(`   Method: ${test.method}`);
     console.log(`   Endpoint: ${test.endpoint}`);
     console.log(`   Expected: ${test.description}`);
-    
+
     const result = await testRoute(test.method, test.endpoint);
-    
+
     console.log(`   Status: ${result.status}`);
     console.log(`   Response:`, result.data || result.error);
-    
+
     if (result.ok) {
       console.log(`   ✅ PASSED`);
     } else {

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Search, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/contexts/AuthContext";
+import { useProfile } from "@/contexts/ProfileContext";
 import { CampusShell } from "@/components/campusflow/CampusShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -43,7 +43,7 @@ interface PaginationMeta {
 }
 
 export default function AdminUsers() {
-  const { profile } = useAuth();
+  const { profile } = useProfile();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [pagination, setPagination] = useState<PaginationMeta | null>(null);
   const [page, setPage] = useState(1);
@@ -88,8 +88,8 @@ export default function AdminUsers() {
         console.error("Failed to fetch admin users:", err);
         setError(
           err?.response?.data?.error?.message ||
-            err?.message ||
-            "Failed to fetch users"
+          err?.message ||
+          "Failed to fetch users"
         );
       } finally {
         setLoading(false);
@@ -111,7 +111,7 @@ export default function AdminUsers() {
       console.error("Failed to update user role:", err);
       toast.error(
         err?.response?.data?.error?.message ||
-          "Failed to update user role. Please try again."
+        "Failed to update user role. Please try again."
       );
     } finally {
       setUpdatingUserId(null);
@@ -136,7 +136,7 @@ export default function AdminUsers() {
       console.error("Failed to update user status:", err);
       toast.error(
         err?.response?.data?.error?.message ||
-          "Failed to update user status. Please try again."
+        "Failed to update user status. Please try again."
       );
     } finally {
       setUpdatingUserId(null);

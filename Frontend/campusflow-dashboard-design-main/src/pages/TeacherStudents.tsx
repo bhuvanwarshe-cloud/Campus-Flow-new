@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import {
     Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { useAuth } from "@/contexts/AuthContext";
+import { useProfile } from "@/contexts/ProfileContext";
 import api from "@/lib/api";
 import {
     Search, RefreshCw, Users, ChevronLeft, ChevronRight,
@@ -60,7 +60,7 @@ function MarksBadge({ avg }: { avg: number | null }) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function TeacherStudents() {
-    const { profile } = useAuth();
+    const { profile } = useProfile();
 
     // Data state
     const [students, setStudents] = useState<Student[]>([]);

@@ -4,6 +4,7 @@ import { StatCard } from "@/components/campusflow/StatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
+import { useProfile } from "@/contexts/ProfileContext";
 import { useState, useEffect, useCallback } from "react";
 import api from "@/lib/api";
 import { useRealtime } from "@/hooks/useRealtime";
@@ -58,7 +59,7 @@ interface NotificationItem {
 
 // ── Main Component ───────────────────────────────────────────────────────────
 export default function StudentDashboard() {
-  const { profile } = useAuth();
+  const { profile } = useProfile();
 
   const [marks, setMarks] = useState<any[]>([]);
   const [marksSummary, setMarksSummary] = useState<{ total: number; average: number }>({ total: 0, average: 0 });

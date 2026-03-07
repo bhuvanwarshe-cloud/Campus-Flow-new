@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useAuth } from "@/contexts/AuthContext";
+import { useProfile } from "@/contexts/ProfileContext";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
@@ -38,7 +39,8 @@ interface ProfileFormData {
 }
 
 export default function ProfileComplete() {
-    const { user, profile, refreshProfile, loading, profileLoading } = useAuth();
+    const { user, loading } = useAuth();
+    const { profile, refreshProfile, loadingProfile } = useProfile();
     const navigate = useNavigate();
     const { toast } = useToast();
     const [isLoading, setIsLoading] = useState(false);
@@ -61,7 +63,7 @@ export default function ProfileComplete() {
         }
 
         // Wait for profile to load
-        if (loading || profileLoading) {
+        if (loading || loadingProfile) {
             return;
         }
 
@@ -88,7 +90,7 @@ export default function ProfileComplete() {
                 address: profile.address || "",
             }));
         }
-    }, [user, profile, loading, profileLoading, navigate]);
+    }, [user, profile, loading, loadingProfile, navigate]);
 
     const handleInputChange = (field: keyof ProfileFormData, value: string) => {
         setFormData(prev => ({ ...prev, [field]: value }));
@@ -114,27 +116,23 @@ export default function ProfileComplete() {
         }
     };
 
-    const uploadProfilePhoto = async (userId: string): Promise<string | null> => {
+    const uploadProfilePhoto = async (): Promise<string | null> => {
         if (!formData.profilePhoto) return null;
 
         try {
-            const fileExt = formData.profilePhoto.name.split('.').pop();
-            const fileName = `${userId}.${fileExt}`;
-            const filePath = `profile-photos/${fileName}`;
+            const formDataUpload = new FormData();
+            formDataUpload.append('avatar', formData.profilePhoto);
 
-            const { error: uploadError } = await supabase.storage
-                .from('profile-photos')
-                .upload(filePath, formData.profilePhoto, { upsert: true });
+            const { data } = await api.post('/api/profile/avatar', formDataUpload);
 
-            if (uploadError) throw uploadError;
-
-            const { data: { publicUrl } } = supabase.storage
-                .from('profile-photos')
-                .getPublicUrl(filePath);
-
-            return publicUrl;
+            return data.avatar_url;
         } catch (error) {
             console.error('Photo upload error:', error);
+            toast({
+                title: "Error",
+                description: "Failed to upload photo",
+                variant: "destructive",
+            });
             return null;
         }
     };
@@ -178,7 +176,7 @@ export default function ProfileComplete() {
 
         try {
             // Upload profile photo
-            const photoUrl = user ? await uploadProfilePhoto(user.id) : null;
+            const photoUrl = await uploadProfilePhoto();
 
             // Update profile via backend
             const profileData: any = {
@@ -187,7 +185,7 @@ export default function ProfileComplete() {
                 phone,
                 address,
                 date_of_birth: dateOfBirth,
-                profile_photo: photoUrl,
+                avatar_url: photoUrl,
             };
 
             // Add role-specific fields
@@ -203,7 +201,11 @@ export default function ProfileComplete() {
                 profileData.years_of_experience = parseInt(formData.yearsOfExperience || "0");
             }
 
-            await api.put('/api/profile', profileData);
+            // The completeProfile backend function now handles role logic based on token.
+            await api.post('/api/profile/complete', {
+                ...profileData,
+                role: profile?.role
+            });
 
             toast({
                 title: "Success!",
@@ -327,17 +329,26 @@ export default function ProfileComplete() {
                                 />
                             </div>
 
-                            <div className="space-y-2">
+                            <div className="space-y-3">
                                 <Label htmlFor="profilePhoto">Profile Photo (Optional)</Label>
-                                <div className="flex items-center gap-4">
-                                    {photoPreview && (
-                                        <img src={photoPreview} alt="Preview" className="h-16 w-16 rounded-full object-cover border-2" />
-                                    )}
+                                <div className="flex items-center gap-6">
+                                    <div className="relative h-24 w-24 rounded-full overflow-hidden border-4 border-muted/50 bg-muted/20 flex items-center justify-center shrink-0">
+                                        {photoPreview ? (
+                                            <img src={photoPreview} alt="Preview" className="h-full w-full object-cover" />
+                                        ) : (
+                                            <Upload className="h-8 w-8 text-muted-foreground/50" />
+                                        )}
+                                    </div>
                                     <label className="flex-1 cursor-pointer">
-                                        <div className="flex items-center justify-center gap-2 h-10 rounded-md border border-input bg-background px-3 hover:bg-accent hover:text-accent-foreground">
+                                        <div className="flex items-center justify-center gap-2 h-10 rounded-md xl:w-1/2 border border-input bg-background px-4 hover:bg-accent hover:text-accent-foreground transition-colors">
                                             <Upload className="h-4 w-4" />
-                                            <span className="text-sm">{formData.profilePhoto ? formData.profilePhoto.name : 'Choose photo'}</span>
+                                            <span className="text-sm font-medium">
+                                                {formData.profilePhoto ? 'Change photo' : 'Upload photo'}
+                                            </span>
                                         </div>
+                                        <p className="text-xs text-muted-foreground mt-2">
+                                            {formData.profilePhoto ? formData.profilePhoto.name : 'JPG, PNG or GIF (Max 5MB)'}
+                                        </p>
                                         <input
                                             id="profilePhoto"
                                             type="file"

@@ -5,7 +5,7 @@
 # Tests all marks-related endpoints
 # ============================================
 
-BASE_URL="http://localhost:5000"
+BASE_URL="http://localhost:5100"
 
 # Replace with actual tokens from Supabase
 ADMIN_TOKEN="YOUR_ADMIN_JWT_TOKEN"

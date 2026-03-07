@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
+import { useProfile } from "@/contexts/ProfileContext";
 import { useToast } from "@/hooks/use-toast";
 import { useRealtime } from "@/hooks/useRealtime";
 import api from "@/lib/api";
@@ -34,7 +35,7 @@ interface Submission {
 }
 
 export default function TeacherAssignments() {
-    const { profile } = useAuth();
+    const { profile } = useProfile();
     const { toast } = useToast();
 
     const [classes, setClasses] = useState<ClassItem[]>([]);

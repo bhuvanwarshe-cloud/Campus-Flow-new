@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import { useAuth } from "@/contexts/AuthContext";
+import { useProfile } from "@/contexts/ProfileContext";
 import { useNavigate } from "react-router-dom";
 import {
   LineChart,
@@ -22,7 +24,6 @@ import { CampusShell } from "@/components/campusflow/CampusShell";
 import { StatCard } from "@/components/campusflow/StatCard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { useAuth } from "@/contexts/AuthContext";
 import { Skeleton } from "@/components/ui/skeleton";
 import api from "@/lib/api";
 import { FileUpload } from "@/components/campusflow/FileUpload";
@@ -36,7 +37,8 @@ const classPulse = [
 ];
 
 export default function TeacherDashboard() {
-  const { profile } = useAuth();
+  const { user } = useAuth();
+  const { profile } = useProfile();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({

@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Users, Calendar, ArrowRight, GraduationCap } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useProfile } from "@/contexts/ProfileContext";
 import api from "@/lib/api";
 
 interface ClassData {
@@ -19,7 +20,7 @@ interface ClassData {
 }
 
 export default function TeacherClasses() {
-    const { profile } = useAuth();
+    const { profile } = useProfile();
     const navigate = useNavigate();
     const [classes, setClasses] = useState<ClassData[]>([]);
     const [loading, setLoading] = useState(true);
