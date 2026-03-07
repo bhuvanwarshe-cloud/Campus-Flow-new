@@ -253,8 +253,8 @@ app.use(errorHandler);
 const PORT = config.port;
 const NODE_ENV = config.nodeEnv;
 
-if (process.env.NODE_ENV !== "test") {
-  app.listen(PORT, () => {
+if (!process.env.JEST_WORKER_ID) {
+  app.listen(PORT, "0.0.0.0", () => {
     console.log("🚀 CampusFlow Backend Server");
     console.log("================================");
     console.log(`📡 Server running on port ${PORT}`);
