@@ -15,8 +15,16 @@ export const getCurrentUserRole = asyncHandler(async (req, res) => {
 
   const role = await supabaseService.getUserRole(userId);
 
+  // New users won't have a role row yet (before profile completion).
+  // Return null gracefully so the frontend can route to /profile/complete.
   if (!role) {
-    throw new AppError("User role not found", 404);
+    return res.json({
+      success: true,
+      data: {
+        userId,
+        role: null,
+      },
+    });
   }
 
   res.json({

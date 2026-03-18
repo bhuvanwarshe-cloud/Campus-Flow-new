@@ -29,7 +29,7 @@ export const getMyProfile = asyncHandler(async (req, res) => {
   const { data: baseProfile, error: baseErr } = await supabase
     .from("profiles")
     .select("*")
-    .eq("id", userId)
+    .eq("user_id", userId)
     .single();
 
   // If no base profile exists, return incomplete flag
@@ -133,7 +133,7 @@ export const upsertProfile = asyncHandler(async (req, res) => {
     const { data: updatedProfile, error: pError } = await supabase
       .from("profiles")
       .update(profilePayload)
-      .eq("id", userId) // auth.users id
+      .eq("user_id", userId) // auth.users id
       .select()
       .single();
 
@@ -223,7 +223,7 @@ export const upsertProfile = asyncHandler(async (req, res) => {
  * @param {Object} res - Express response
  */
 export const completeProfile = asyncHandler(async (req, res) => {
-  const userId = req.user.id; // From verified JWT
+  const userId = req.user.id;
   const {
     first_name,
     last_name,
@@ -231,133 +231,45 @@ export const completeProfile = asyncHandler(async (req, res) => {
     address,
     date_of_birth,
     avatar_url,
-
-    // Role comes from the JWT/existing profiles usually, but we accept it here for first-time setup
-    role,
-
-    // Student fields
-    branch,
-    degree,
-    registration_number,
-    admission_year,
-
-    // Teacher fields
-    subjects,
-    department,
-    qualification,
-    years_of_experience,
   } = req.body;
 
-  if (!first_name || !last_name || !role) {
-    throw new AppError("Missing required fields (first_name, last_name, role)", 400);
+  if (!first_name || !last_name) {
+    throw new AppError("Missing required fields (first_name, last_name)", 400);
   }
 
-  // To ensure TRUE transactionality across multiple schema tables in Supabase 
-  // (profiles, roles, student_profiles, teacher_profiles, students) without relying on JS promise racing,
-  // we use a dedicated RPC defined for profile completion. If not defining an RPC, we must rely on 
-  // sequential awaits which are not atomic on failure. Since the prompt says "Wrap multi-table writes inside a DB transaction"
-  // and we cannot alter schema directly here, we will simulate a JS transaction using Promise.all/rollback or upserts.
-  // Actually, Supabase REST API doesn't support generic transactions. 
-  // Let's use pure sequential awaited Upserts with robust error handling based on the user req.
-
   try {
-    // 1. UPDATE profiles table (row already exists from auth trigger)
-    const { data: profile, error: profileError } = await supabase
+    // UPSERT profile with basic info only.
+    // role is always set to 'pending' here — role approval is admin-only.
+    const { data: profile, error: profileError } = await supabaseAdmin
       .from("profiles")
-      .update({
+      .upsert({
+        user_id: userId,
+        email: req.user.email,
         first_name,
         last_name,
-        phone,
-        address,
-        dob: date_of_birth,
+        phone: phone || null,
+        address: address || null,
+        dob: date_of_birth || null,
         profile_picture_url: avatar_url || null,
         is_profile_complete: true,
-      })
-      .eq("id", userId)
+      }, { onConflict: "user_id" })
       .select()
       .single();
 
-    if (profileError) {
-      if (profileError.code === "PGRST116") {
-        throw new AppError("Profile not initialized. Please sign up again.", 404);
-      }
-      throw profileError;
-    }
+    if (profileError) throw profileError;
 
-    if (!profile) {
-      throw new AppError("Profile not found", 404);
-    }
+    // We no longer set the role to 'pending' in the roles table because the Postgres CHECK constraint
+    // does not allow it (only admin, teacher, student). 
+    // The frontend correctly handles a `null` role and routes to /role-request.
 
-    // 2. Ensure `roles` table existence
-    await supabase.from("roles").upsert(
-      { user_id: userId, role: role }
-    );
-
-    // 3. Upsert Role Specific Tables
-    let roleData = null;
-
-    if (role === 'student') {
-      const studentPayload = {
-        user_id: userId,
-        branch,
-        degree,
-        registration_number,
-        admission_year: admission_year ? parseInt(admission_year) : null,
-      };
-
-      const { data: spData, error: spError } = await supabase
-        .from("student_profiles")
-        .upsert(studentPayload, { onConflict: 'user_id' })
-        .select()
-        .single();
-
-      if (spError) throw spError;
-      roleData = spData;
-
-      // Sync legacy students table (ignore if it fails)
-      try {
-        await supabase
-          .from("students")
-          .upsert({
-            id: userId,
-            user_id: userId,
-            name: `${first_name} ${last_name}`.trim(),
-          });
-      } catch (e) {
-        if (e.code !== '42P01') console.warn("Could not sync to legacy students table:", e.message);
-      }
-
-    } else if (role === 'teacher') {
-      const teacherPayload = {
-        user_id: userId,
-        subjects_taught: Array.isArray(subjects) ? subjects : (typeof subjects === 'string' ? subjects.split(',').map(s => s.trim()) : []),
-        department,
-        qualification,
-        experience_years: years_of_experience ? parseInt(years_of_experience) : null,
-      };
-
-      const { data: tpData, error: tpError } = await supabase
-        .from("teacher_profiles")
-        .upsert(teacherPayload, { onConflict: 'user_id' })
-        .select()
-        .single();
-
-      if (tpError) throw tpError;
-      roleData = tpData;
-    }
-
-    // 4. Return merged response
     res.status(200).json({
       success: true,
-      data: {
-        ...profile,
-        roleData
-      },
-      message: "Profile completed successfully",
+      data: profile,
+      message: "Profile saved. Please submit a role request.",
     });
 
   } catch (error) {
-    console.error("Profile Completion Transaction Error:", error);
+    console.error("Profile Completion Error:", error);
     throw new AppError(`Failed to save profile: ${error.message}`, 500);
   }
 });
@@ -417,7 +329,7 @@ export const uploadProfilePhoto = asyncHandler(async (req, res) => {
     const { data: profileData, error: updateError } = await supabaseAdmin
       .from("profiles")
       .update({ profile_picture_url: publicUrl })
-      .eq("id", req.user.id)
+      .eq("user_id", req.user.id)
       .select()
       .single();
 
@@ -456,7 +368,7 @@ export const deleteProfilePhoto = asyncHandler(async (req, res) => {
 
   try {
     // 1. Get current subPath from profile to delete
-    const { data: profile } = await supabase.from('profiles').select('profile_picture_url').eq('id', userId).single();
+    const { data: profile } = await supabase.from('profiles').select('profile_picture_url').eq('user_id', userId).single();
     if (profile && profile.profile_picture_url) {
       // Extract filename from the URL
       const urlParts = profile.profile_picture_url.split('/');
@@ -466,7 +378,7 @@ export const deleteProfilePhoto = asyncHandler(async (req, res) => {
     }
 
     // 2. Clear from DB
-    await supabase.from("profiles").update({ profile_picture_url: null }).eq("id", userId);
+    await supabase.from("profiles").update({ profile_picture_url: null }).eq("user_id", userId);
 
     res.status(200).json({
       success: true,

@@ -1,4 +1,4 @@
-import { supabase as supabaseAdmin } from "../config/supabase.js";
+import { supabaseAdmin } from "../config/supabase.js";
 
 /**
  * Send a notification to all students enrolled in a specific class.

@@ -12,9 +12,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
+import { useProfile } from "@/contexts/ProfileContext";
 import api from "@/lib/api";
 
 interface AdminClass {
@@ -24,36 +32,54 @@ interface AdminClass {
   created_at?: string;
   deleted_at?: string | null;
   is_deleted?: boolean;
-  teachers: { id: string; name: string }[];
+  teachers: { id: string; name: string; is_class_teacher?: boolean }[];
+  class_teacher_id?: string | null;
+  class_teacher_name?: string | null;
   enrollment_count: number;
 }
 
 export default function AdminClasses() {
-  const { profile } = useAuth();
+  const { user } = useAuth();
+  const { profile } = useProfile();
   const [classes, setClasses] = useState<AdminClass[]>([]);
+  const [teachers, setTeachers] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [assigningId, setAssigningId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const displayName = profile?.firstName
     ? `${profile.firstName} ${profile.lastName || ""}`.trim()
     : "Administrator";
 
-  const fetchClasses = async () => {
+  const fetchData = async () => {
     setLoading(true);
     setError(null);
     try {
-      const { data } = await api.get("/api/admin/classes");
-      if (!data?.success) {
-        throw new Error(data?.error?.message || "Failed to load classes");
+      const [classesRes, teachersRes] = await Promise.all([
+        api.get("/api/admin/classes"),
+        api.get("/api/admin/teachers")
+      ]);
+
+      if (!classesRes.data?.success) {
+        throw new Error(classesRes.data?.error?.message || "Failed to load classes");
       }
-      setClasses(data.data || []);
+      setClasses(classesRes.data.data || []);
+
+      if (teachersRes.data?.success) {
+        const teacherData = teachersRes.data.data.map((t: any) => {
+          const name = t.name || (t.profiles ? `${t.profiles.first_name || ""} ${t.profiles.last_name || ""}`.trim() : null) || t.first_name || "Unknown Teacher";
+          const id = t.user_id || t.id;
+          return { id, name };
+        });
+        setTeachers(teacherData);
+      }
     } catch (err: any) {
-      console.error("Failed to fetch admin classes:", err);
+      console.error("Failed to fetch admin data:", err);
       setError(
         err?.response?.data?.error?.message ||
-          err?.message ||
-          "Failed to load classes"
+        err?.message ||
+        "Failed to load classes"
       );
     } finally {
       setLoading(false);
@@ -61,8 +87,36 @@ export default function AdminClasses() {
   };
 
   useEffect(() => {
-    fetchClasses();
+    fetchData();
   }, []);
+
+  const handleAssignTeacher = async (classId: string, teacherId: string) => {
+    setAssigningId(classId);
+    try {
+      await api.patch(`/api/admin/classes/${classId}/assign-class-teacher`, {
+        teacher_id: teacherId,
+      });
+      // Optimistically update
+      setClasses((prev) =>
+        prev.map((c) => {
+          if (c.id === classId) {
+            const newTeacher = teachers.find(t => t.id === teacherId);
+            return {
+              ...c,
+              class_teacher_id: teacherId,
+              class_teacher_name: newTeacher?.name || "Unknown Teacher"
+            };
+          }
+          return c;
+        })
+      );
+    } catch (err: any) {
+      console.error("Failed to assign class teacher:", err);
+      setError(err?.response?.data?.error?.message || "Failed to assign class teacher");
+    } finally {
+      setAssigningId(null);
+    }
+  };
 
   const handleSoftToggle = async (cls: AdminClass) => {
     // NOTE: This assumes a future PATCH /api/admin/classes/:id endpoint
@@ -77,10 +131,10 @@ export default function AdminClasses() {
         prev.map((c) =>
           c.id === cls.id
             ? {
-                ...c,
-                is_deleted: nextDeleted,
-                deleted_at: nextDeleted ? new Date().toISOString() : null,
-              }
+              ...c,
+              is_deleted: nextDeleted,
+              deleted_at: nextDeleted ? new Date().toISOString() : null,
+            }
             : c
         )
       );
@@ -140,13 +194,12 @@ export default function AdminClasses() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={fetchClasses}
+                onClick={fetchData}
                 disabled={loading}
               >
                 <RefreshCw
-                  className={`mr-1.5 h-3.5 w-3.5 ${
-                    loading ? "animate-spin" : ""
-                  }`}
+                  className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""
+                    }`}
                 />
                 Refresh
               </Button>
@@ -157,7 +210,8 @@ export default function AdminClasses() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Name</TableHead>
-                      <TableHead>Teachers</TableHead>
+                      <TableHead>Class Teacher</TableHead>
+                      <TableHead>Other Teachers</TableHead>
                       <TableHead>Students</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead className="w-[140px] text-right">
@@ -201,7 +255,31 @@ export default function AdminClasses() {
                                 </span>
                               )}
                             </TableCell>
-                            <TableCell>{teacherNames}</TableCell>
+                            <TableCell>
+                              {assigningId === cls.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                              ) : (
+                                <Select
+                                  value={cls.class_teacher_id || ""}
+                                  onValueChange={(val) => handleAssignTeacher(cls.id, val)}
+                                  disabled={isDeleted}
+                                >
+                                  <SelectTrigger className="w-[180px] h-8 text-xs">
+                                    <SelectValue placeholder="Assign a teacher">
+                                       {cls.class_teacher_name || "Assign a teacher"}
+                                    </SelectValue>
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {teachers.map(t => (
+                                      <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground max-w-[150px] truncate" title={teacherNames}>
+                              {teacherNames}
+                            </TableCell>
                             <TableCell>{cls.enrollment_count ?? 0}</TableCell>
                             <TableCell>
                               {isDeleted ? (

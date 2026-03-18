@@ -467,11 +467,53 @@ export const updateUserStatus = async (userId, isActive) => {
 };
 
 /**
+ * Assign a teacher as the class teacher for a specific class.
+ * Ensures only one class teacher exists by resetting the flag first.
+ */
+export const assignClassTeacher = async (classId, teacherId) => {
+  if (!classId || !teacherId) throw new AppError("classId and teacherId are required", 400);
+
+  // 1. Reset existing class teacher
+  await supabase
+    .from("teacher_classes")
+    .update({ is_class_teacher: false })
+    .eq("class_id", classId)
+    .eq("is_class_teacher", true);
+
+  // 2. Check if a mapping already exists for this teacher and class
+  const { data: existing } = await supabase
+    .from("teacher_classes")
+    .select("id")
+    .eq("class_id", classId)
+    .eq("teacher_id", teacherId)
+    .maybeSingle();
+
+  if (existing) {
+    const { data: updated, error: updateErr } = await supabase
+      .from("teacher_classes")
+      .update({ is_class_teacher: true })
+      .eq("id", existing.id)
+      .select()
+      .single();
+    if (updateErr) throw new AppError(`Failed to update teacher class: ${updateErr.message}`, 500);
+    return updated;
+  } else {
+    const { data: inserted, error: insertErr } = await supabase
+      .from("teacher_classes")
+      .insert({ class_id: classId, teacher_id: teacherId, is_class_teacher: true })
+      .select()
+      .single();
+    if (insertErr) throw new AppError(`Failed to insert teacher class: ${insertErr.message}`, 500);
+    return inserted;
+  }
+};
+
+/**
  * Admin-focused classes listing with teacher info and enrollment counts.
  */
 export const getAdminClasses = async () => {
   // Fetch all classes (we'll handle soft-deleted via deleted_at if present)
-  const { data: classes, error: classesError } = await supabase
+  const { data: classes, error: classesError } = await supabaseAdmin
     .from("classes")
     .select("*");
 
@@ -491,7 +533,7 @@ export const getAdminClasses = async () => {
   // Teacher assignments
   const { data: teacherAssignments, error: teacherAssignError } = await supabase
     .from("teacher_classes")
-    .select("class_id, teacher_id")
+    .select("class_id, teacher_id, is_class_teacher")
     .in("class_id", classIds);
 
   if (teacherAssignError && teacherAssignError.code !== "42P01") {
@@ -507,22 +549,21 @@ export const getAdminClasses = async () => {
 
   let teacherMap = {};
   if (teacherIds.length > 0) {
-    const { data: teacherProfiles, error: teacherProfilesError } =
+    const { data: userProfiles, error: profilesError } =
       await supabaseAdmin
-        .from("teacher_profiles")
-        .select("user_id, first_name, last_name")
+        .from("profiles")
+        .select("user_id, full_name, first_name, last_name")
         .in("user_id", teacherIds);
 
-    if (teacherProfilesError && teacherProfilesError.code !== "42P01") {
-      console.error("❌ Error fetching teacher profiles:", teacherProfilesError);
+    if (profilesError && profilesError.code !== "42P01") {
+      console.error("❌ Error fetching teacher profiles:", profilesError);
       throw new AppError("Failed to fetch teacher profiles", 500);
     }
 
     teacherMap = {};
-    (teacherProfiles || []).forEach((t) => {
-      teacherMap[t.user_id] = `${t.first_name || ""} ${
-        t.last_name || ""
-      }`.trim() || "Unknown Teacher";
+    (userProfiles || []).forEach((p) => {
+      const fullName = p.full_name || `${p.first_name || ""} ${p.last_name || ""}`.trim() || "Unknown Teacher";
+      teacherMap[p.user_id] = fullName;
     });
   }
 
@@ -546,15 +587,22 @@ export const getAdminClasses = async () => {
   const assignmentMap = {};
   (teacherAssignments || []).forEach((a) => {
     if (!assignmentMap[a.class_id]) assignmentMap[a.class_id] = [];
-    assignmentMap[a.class_id].push(a.teacher_id);
+    assignmentMap[a.class_id].push({
+      teacher_id: a.teacher_id,
+      is_class_teacher: a.is_class_teacher
+    });
   });
 
   return classes.map((cls) => {
-    const assignedTeacherIds = assignmentMap[cls.id] || [];
-    const teachers = assignedTeacherIds.map((tid) => ({
-      id: tid,
-      name: teacherMap[tid] || "Unknown Teacher",
+    const assignments = assignmentMap[cls.id] || [];
+    const teachers = assignments.map((a) => ({
+      id: a.teacher_id,
+      name: teacherMap[a.teacher_id] || "Unknown Teacher",
+      is_class_teacher: a.is_class_teacher
     }));
+
+    // Explicitly identify the class teacher for easier access
+    const classTeacher = teachers.find(t => t.is_class_teacher);
 
     const deletedAt = cls.deleted_at || null;
 
@@ -566,6 +614,8 @@ export const getAdminClasses = async () => {
       deleted_at: deletedAt,
       is_deleted: !!deletedAt,
       teachers,
+      class_teacher_id: classTeacher?.id || null,
+      class_teacher_name: classTeacher?.name || null,
       enrollment_count: enrollmentMap[cls.id] || 0,
     };
   });
@@ -712,8 +762,8 @@ export const getAdminAcademics = async (options = {}) => {
     let teacherProfiles = [];
     if (teacherIds.length > 0) {
       const { data: tProfiles, error: tProfilesError } = await supabaseAdmin
-        .from("teacher_profiles")
-        .select("user_id, first_name, last_name")
+        .from("profiles")
+        .select("user_id, full_name, first_name, last_name")
         .in("user_id", teacherIds);
 
       if (tProfilesError && tProfilesError.code !== "42P01") {
@@ -723,10 +773,9 @@ export const getAdminAcademics = async (options = {}) => {
     }
 
     const teacherNameMap = {};
-    teacherProfiles.forEach((t) => {
-      teacherNameMap[t.user_id] = `${t.first_name || ""} ${
-        t.last_name || ""
-      }`.trim() || "Unknown Teacher";
+    teacherProfiles.forEach((p) => {
+      const fullName = p.full_name || `${p.first_name || ""} ${p.last_name || ""}`.trim() || "Unknown Teacher";
+      teacherNameMap[p.user_id] = fullName;
     });
 
     // Map teacher -> class_ids
@@ -901,7 +950,7 @@ export const createClass = async (classData) => {
  * @returns {Promise<Array>} List of classes
  */
 export const getClasses = async (filters = {}) => {
-  let query = supabase.from("classes").select("*");
+  let query = supabaseAdmin.from("classes").select("*");
 
   if (filters.createdBy) {
     query = query.eq("created_by", filters.createdBy);
@@ -1656,66 +1705,84 @@ export const getAllStudents = async () => {
  */
 export const getAllTeachers = async () => {
   try {
-    const { data, error } = await supabaseAdmin
-      .from("teacher_profiles")
-      .select(`
-        user_id,
-        first_name,
-        last_name,
-        phone,
-        address,
-        department,
-        qualification,
-        experience_years,
-        subjects_taught,
-        profile_photo_url,
-        created_at,
-        updated_at
-      `)
-      .order("created_at", { ascending: false });
+    // First fetch all teacher user IDs from roles table
+    const { data: teacherRoles, error: rolesError } = await supabaseAdmin
+      .from("roles")
+      .select("user_id")
+      .eq("role", "teacher");
 
-    if (error) {
-      // 42P01 = table doesn't exist - return empty array
-      if (error.code === "42P01") {
-        console.warn("ℹ️ teacher_profiles table not found, returning empty array");
+    if (rolesError) {
+      if (rolesError.code === "42P01") {
+        console.warn("ℹ️ roles table not found, returning empty array");
         return [];
       }
-      console.error("❌ Error fetching teachers:", error);
-      throw new AppError(`Failed to fetch teachers: ${error.message || error.code || 'Unknown error'}`, 500);
+      throw new AppError(`Failed to fetch teachers: ${rolesError.message}`, 500);
     }
 
-    if (!data || data.length === 0) {
+    if (!teacherRoles || teacherRoles.length === 0) {
       return [];
     }
 
-    // Fetch emails from auth.users (handle individual failures gracefully)
-    const teachersWithEmails = await Promise.allSettled(
-      data.map(async (teacher) => {
-        try {
-          const { data: userData } = await supabaseAdmin.auth.admin.getUserById(teacher.user_id);
-          return {
-            ...teacher,
-            email: userData?.user?.email || "N/A",
-            role: "teacher",
-            profile_complete: !!(teacher.first_name && teacher.last_name && teacher.department && teacher.qualification)
-          };
-        } catch (authError) {
-          // If auth lookup fails for one user, still return the teacher with N/A email
-          console.warn(`⚠️ Failed to fetch email for teacher ${teacher.user_id}:`, authError);
-          return {
-            ...teacher,
-            email: "N/A",
-            role: "teacher",
-            profile_complete: !!(teacher.first_name && teacher.last_name && teacher.department && teacher.qualification)
-          };
-        }
-      })
-    );
+    const teacherIds = teacherRoles.map(t => t.user_id);
 
-    // Filter out any rejected promises and return fulfilled results
-    return teachersWithEmails
-      .filter((result) => result.status === "fulfilled")
-      .map((result) => result.value);
+    // Fetch comprehensive profile data from profiles table (authoritative source)
+    const { data: profiles, error: profilesError } = await supabaseAdmin
+      .from("profiles")
+      .select("user_id, full_name, first_name, last_name, email")
+      .in("user_id", teacherIds);
+
+    if (profilesError) {
+      if (profilesError.code === "42P01") {
+        console.warn("ℹ️ profiles table not found, returning empty array");
+        return [];
+      }
+      throw new AppError(`Failed to fetch teacher profiles: ${profilesError.message}`, 500);
+    }
+
+    // Fetch teacher-specific metadata from teacher_profiles
+    const { data: teacherProfiles, error: tProfilesError } = await supabaseAdmin
+      .from("teacher_profiles")
+      .select("user_id, department, qualification, experience_years, subjects_taught, profile_photo_url, created_at, updated_at")
+      .in("user_id", teacherIds);
+
+    if (tProfilesError && tProfilesError.code !== "42P01") {
+      console.warn("⚠️ Could not fetch teacher_profiles metadata");
+    }
+
+    // Build teacher profiles map
+    const tProfilesMap = {};
+    (teacherProfiles || []).forEach(tp => {
+      tProfilesMap[tp.user_id] = tp;
+    });
+
+    // Merge profile data with teacher metadata
+    const teachers = (profiles || []).map(profile => {
+      const tMeta = tProfilesMap[profile.user_id] || {};
+      const fullName = profile.full_name || `${profile.first_name || ""} ${profile.last_name || ""}`.trim() || "Unknown Teacher";
+      
+      return {
+        user_id: profile.user_id,
+        id: profile.user_id,
+        name: fullName,
+        full_name: fullName,
+        first_name: profile.first_name,
+        last_name: profile.last_name,
+        email: profile.email || "N/A",
+        phone: tMeta.phone,
+        address: tMeta.address,
+        department: tMeta.department,
+        qualification: tMeta.qualification,
+        experience_years: tMeta.experience_years,
+        subjects_taught: tMeta.subjects_taught,
+        profile_photo_url: tMeta.profile_photo_url,
+        role: "teacher",
+        profile_complete: !!(profile.first_name && profile.last_name && tMeta.department && tMeta.qualification),
+        created_at: tMeta.created_at,
+        updated_at: tMeta.updated_at
+      };
+    });
+
+    return teachers;
   } catch (err) {
     // If it's already an AppError, re-throw it
     if (err instanceof AppError) {
@@ -2308,6 +2375,25 @@ export const getStudentsByTeacher = async (
   console.log(`[getStudentsByTeacher] ${students?.length ?? 0} students returned (total: ${count})`);
   if (!students || students.length === 0) return { data: [], count: 0 };
 
+  // ── Step 4.5: Fetch full names from profiles table ──────────────────────
+  const studentUserIds = students.map(s => s.id);
+  let profileMap = {};
+  if (studentUserIds.length > 0) {
+    try {
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("user_id, full_name, first_name, last_name")
+        .in("user_id", studentUserIds);
+      if (profiles) {
+        profileMap = Object.fromEntries(profiles.map(p => {
+          // Use full_name if available, otherwise construct from first_name and last_name
+          const fullName = p.full_name || (p.first_name || "") + (p.last_name ? ` ${p.last_name}` : "");
+          return [p.user_id, fullName.trim() || null];
+        }));
+      }
+    } catch (_) { /* non-fatal */ }
+  }
+
   // ── Step 5: Enrich with attendance % and avg marks ───────────────────────
   const enrichedStudents = await Promise.all(
     students.map(async (s) => {
@@ -2342,7 +2428,7 @@ export const getStudentsByTeacher = async (
 
       return {
         id: s.id,
-        name: s.name,
+        name: profileMap[s.id] || s.name || "Unknown Student",
         email: s.email,
         roll_no: s.roll_no != null ? String(s.roll_no) : "—",
         class: classNameMap[sClassId] || "Unknown",
@@ -2477,6 +2563,7 @@ export default {
   getAllStudents,
   getAllTeachers,
   getAdminClasses,
+  assignClassTeacher,
   getAdminAcademics,
   // New: Announcements
   createAnnouncement,

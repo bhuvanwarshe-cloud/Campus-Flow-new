@@ -83,7 +83,8 @@ export const getClasses = asyncHandler(async (req, res) => {
     filters.createdBy = createdBy;
   }
 
-  const { data, count } = await supabaseService.getClasses(filters, page, limit);
+  const data = await supabaseService.getClasses(filters, page, limit);
+  const count = data.length || 0;
 
   res.json({
     success: true,

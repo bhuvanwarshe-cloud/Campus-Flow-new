@@ -22,8 +22,8 @@ router.get("/overview", adminController.getOverview);
 router.get("/users", adminController.getAllUsers);
 // GET    /api/admin/users/students     - List all students (legacy endpoint)
 router.get("/users/students", adminController.getAllStudents);
-// GET    /api/admin/users/teachers     - List all teachers (legacy endpoint)
-router.get("/users/teachers", adminController.getAllTeachers);
+// GET    /api/admin/teachers     - List all approved teachers
+router.get("/teachers", adminController.getAllTeachers);
 // PATCH  /api/admin/users/:id/role     - Update user role
 router.patch("/users/:id/role", adminController.updateUserRole);
 // PATCH  /api/admin/users/:id/status   - Enable/disable user
@@ -32,9 +32,19 @@ router.patch("/users/:id/status", adminController.updateUserStatus);
 // Classes
 // GET /api/admin/classes
 router.get("/classes", adminController.getAdminClasses);
+// PATCH /api/admin/classes/:class_id/assign-class-teacher
+router.patch("/classes/:class_id/assign-class-teacher", adminController.assignClassTeacher);
 
 // Academics insights
 // GET /api/admin/academics
 router.get("/academics", adminController.getAcademicsOverview);
+
+// Teacher Invitations
+// POST /api/admin/invite-teacher
+router.post("/invite-teacher", adminController.inviteTeacher);
+// GET /api/admin/invites
+router.get("/invites", adminController.listTeacherInvites);
+// POST /api/admin/invites/:id/resend
+router.post("/invites/:id/resend", adminController.resendTeacherInvite);
 
 export default router;

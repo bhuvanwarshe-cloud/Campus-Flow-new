@@ -5,8 +5,9 @@
  */
 
 import supabaseService from "../services/supabase.service.js";
-import { supabase } from "../config/supabase.js";
+import { supabase, supabaseAdmin } from "../config/supabase.js";
 import { AppError, asyncHandler } from "../utils/errorHandler.js";
+import { sendUserNotification } from "../utils/notifications.js";
 
 // ============================================
 // HELPER: Resolve student record from auth user
@@ -66,10 +67,14 @@ export const getMyMarks = asyncHandler(async (req, res) => {
         try {
             const { data: profiles } = await supabase
                 .from("profiles")
-                .select("id, full_name")
-                .in("id", uploaderIds);
+                .select("user_id, full_name, first_name, last_name")
+                .in("user_id", uploaderIds);
             if (profiles) {
-                teacherMap = Object.fromEntries(profiles.map(p => [p.id, p.full_name]));
+                teacherMap = Object.fromEntries(profiles.map(p => {
+                    // Use full_name if available, otherwise construct from first_name and last_name
+                    const fullName = p.full_name || (p.first_name || "") + (p.last_name ? ` ${p.last_name}` : "");
+                    return [p.user_id, fullName.trim() || "Unknown Teacher"];
+                }));
             }
         } catch { /* non-fatal */ }
     }
@@ -308,5 +313,85 @@ export const getMyAnnouncements = asyncHandler(async (req, res) => {
         success: true,
         data: announcements,
         count: announcements.length,
+    });
+});
+
+// ============================================
+// POST /api/student/join-request
+// Submit a request to join a class
+// ============================================
+export const submitJoinRequest = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+
+    // Check if user has an existing role
+    const currentRole = await supabaseService.getUserRole(userId);
+    if (currentRole && currentRole !== "pending") {
+        throw new AppError(`You already have a role (${currentRole}).`, 409);
+    }
+
+    const {
+        class_id,
+        branch,
+        degree,
+        registration_number,
+        admission_year,
+        notes
+    } = req.body;
+
+    if (!class_id) {
+        throw new AppError("Class must be selected", 400);
+    }
+
+    const metadata = {};
+    if (branch) metadata.branch = branch;
+    if (degree) metadata.degree = degree;
+    if (registration_number) metadata.registration_number = registration_number;
+    if (admission_year) metadata.admission_year = admission_year;
+
+    const { data, error } = await supabaseAdmin
+        .from("student_join_requests")
+        .insert([{
+            user_id: userId,
+            class_id: class_id,
+            status: "pending",
+            notes: notes || null,
+            metadata: metadata
+        }])
+        .select()
+        .single();
+
+    if (error) {
+        // Handle unique constraint violation gracefully
+        if (error.code === '23505' || error.message.includes('unique constraint')) {
+            throw new AppError("You already have a pending join request.", 409);
+        }
+        throw new AppError(error.message, 500);
+    }
+
+    // Notify class teacher if assigned
+    try {
+        const { data: ctData } = await supabaseAdmin
+            .from("teacher_classes")
+            .select("teacher_id")
+            .eq("class_id", class_id)
+            .eq("is_class_teacher", true)
+            .maybeSingle();
+
+        if (ctData?.teacher_id) {
+            await sendUserNotification(ctData.teacher_id, {
+                title: "New Student Join Request",
+                message: "A new student has requested to join your class. Please review.",
+                type: "info",
+                link: "/teacher/students",
+            });
+        }
+    } catch (err) {
+        console.error("Warning: Failed to send notification to class teacher", err);
+    }
+
+    res.status(201).json({
+        success: true,
+        data,
+        message: "Join request submitted. Awaiting class teacher approval.",
     });
 });

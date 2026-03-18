@@ -38,14 +38,50 @@ export default function Dashboard() {
                 return <TeacherDashboard />;
             case 'student':
                 return <StudentDashboard />;
+            case 'pending':
+                // Ideally ProtectedRoute catches this, but if a race condition allows it through:
+                return (
+                    <div className="flex flex-col min-h-screen items-center justify-center bg-background p-4">
+                        <div className="w-full max-w-md p-8 bg-card rounded-lg border shadow-sm text-center">
+                            <div className="mx-auto h-12 w-12 rounded-full bg-blue-100 flex items-center justify-center mb-4">
+                                <div className="h-6 w-6 animate-pulse bg-blue-500 rounded-full"></div>
+                            </div>
+                            <h2 className="text-xl font-bold mb-2">Role Pending Approval</h2>
+                            <p className="text-muted-foreground mb-6">
+                                Your CampusFlow role request is currently under review by an administrator.
+                            </p>
+                            <Button onClick={() => window.location.href = '/pending-approval'}>
+                                View Request Status
+                            </Button>
+                        </div>
+                    </div>
+                );
+            case 'none':
+            case null:
+            case undefined:
+                // Profile is incomplete
+                return (
+                    <div className="flex flex-col min-h-screen items-center justify-center bg-background p-4">
+                        <div className="w-full max-w-md p-8 bg-card rounded-lg border shadow-sm text-center">
+                            <AlertCircle className="mx-auto h-12 w-12 text-orange-500 mb-4" />
+                            <h2 className="text-xl font-bold mb-2">Profile Setup Required</h2>
+                            <p className="text-muted-foreground mb-6">
+                                Please complete your profile to access CampusFlow.
+                            </p>
+                            <Button onClick={() => window.location.href = '/profile/complete'}>
+                                Complete Profile Now
+                            </Button>
+                        </div>
+                    </div>
+                );
             default:
-                console.error('Unknown role:', profile.role);
+                console.error('Unknown role:', profile?.role);
                 return (
                     <div className="flex flex-col min-h-screen items-center justify-center bg-background p-4">
                         <div className="w-full max-w-md p-6 bg-card rounded-lg border shadow-sm text-center">
                             <h2 className="text-xl font-bold text-destructive mb-2">Access Error</h2>
                             <p className="text-muted-foreground mb-6">
-                                Your account has an unrecognized role: <span className="font-mono text-xs bg-muted px-1 rounded">{profile.role || 'Unknown'}</span>.
+                                Your account has an unrecognized role: <span className="font-mono text-xs bg-muted px-1 rounded">{profile?.role || 'Unknown'}</span>.
                                 Please contact support.
                             </p>
                             <Button variant="outline" onClick={() => window.location.href = '/login'}>

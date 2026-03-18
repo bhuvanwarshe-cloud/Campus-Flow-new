@@ -31,6 +31,7 @@ import studentRoutes from "./routes/student.routes.js";
 import assignmentRoutes from "./routes/assignments.routes.js";
 import testRoutes from "./routes/tests.routes.js";
 import analyticsRoutes from "./routes/analytics.routes.js";
+import teacherInvitesRoutes from "./routes/teacherInvites.routes.js";
 
 // Initialize Express app
 const app = express();
@@ -222,9 +223,12 @@ app.use("/api/notifications", notificationsRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/teacher", teacherRoutes);
 app.use("/api/student", studentRoutes);
+import { joinRequestRouter } from "./routes/student.routes.js";
+app.use("/api/student", joinRequestRouter);
 app.use("/api/assignments", assignmentRoutes);
 app.use("/api/tests", testRoutes);
 app.use("/api/analytics", analyticsRoutes);
+app.use("/api/teacher-invites", teacherInvitesRoutes);
 
 // ============================================
 // 404 HANDLER

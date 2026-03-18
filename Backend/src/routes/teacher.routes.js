@@ -50,4 +50,17 @@ router.post("/exams", teacherController.createExam);
 // GET /api/teacher/stats
 router.get("/stats", teacherController.getTeacherStats);
 
+// ── Role Requests (Student Joins) ─────────────────────────────────────────────
+// POST /api/teacher/request
+router.post("/request", teacherController.submitTeacherRequest);
+
+// GET /api/teacher/student-requests
+router.get("/student-requests", teacherController.getStudentRequests);
+
+// PATCH /api/teacher/student-requests/:id/approve
+router.patch("/student-requests/:id/approve", teacherController.approveStudentRequest);
+
+// PATCH /api/teacher/student-requests/:id/reject
+router.patch("/student-requests/:id/reject", teacherController.rejectStudentRequest);
+
 export default router;

@@ -33,4 +33,15 @@ router.get("/performance", studentController.getMyPerformance);
 // GET /api/student/announcements
 router.get("/announcements", studentController.getMyAnnouncements);
 
+// ── Role Requests (Student Joins) ─────────────────────────────────────────────
+// Note: This route specifically drops auth checks for the `student` role natively
+// so that a pending user can call it successfully but still be auth'ed via JWT
+// We create a new sub-router that only requires authentication.
+const pendingRouter = express.Router();
+pendingRouter.use(authMiddleware);
+pendingRouter.post("/join-request", studentController.submitJoinRequest);
+
+const mainRouter = express.Router();
+mainRouter.use("/api/student", pendingRouter); // Usually this mounts on root, but since this file is exported as the router
+export { pendingRouter as joinRequestRouter };
 export default router;

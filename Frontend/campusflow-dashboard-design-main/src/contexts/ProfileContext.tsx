@@ -5,7 +5,7 @@ import { useAuth } from "./AuthContext";
 export interface UserProfile {
     id: string;
     email: string;
-    role: 'admin' | 'teacher' | 'student';
+    role: 'admin' | 'teacher' | 'student' | 'pending' | 'none';
     firstName?: string;
     lastName?: string;
     phone?: string;
@@ -125,12 +125,12 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
         } finally {
             setLoadingProfile(false);
         }
-    }, [user, session]);
+    }, [user?.id, session?.access_token]);
 
     useEffect(() => {
         let active = true;
 
-        if (user) {
+        if (user?.id) {
             // Wrap in an active check internally just in case React unmounts during the dispatch
             fetchProfile().then(() => {
                 if (!active) return;
@@ -144,7 +144,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
         return () => {
             active = false;
         };
-    }, [user, fetchProfile]);
+    }, [user?.id, fetchProfile]);
 
     return (
         <ProfileContext.Provider value={{ profile, loadingProfile, error, refreshProfile: fetchProfile }}>

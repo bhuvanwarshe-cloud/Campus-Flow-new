@@ -1,6 +1,7 @@
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { NotificationsDropdown, type CampusNotification } from "@/components/campusflow/NotificationsDropdown";
 import { UserMenu } from "@/components/campusflow/UserMenu";
+import { COLLEGE_NAME } from "@/constants/college";
 
 export function CampusTopbar({
   title,
@@ -16,7 +17,10 @@ export function CampusTopbar({
         <SidebarTrigger className="shrink-0" />
 
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-base font-semibold tracking-tight">{title}</h1>
+          <div className="flex flex-col">
+            <h1 className="truncate text-sm font-semibold tracking-tight">{title}</h1>
+            <p className="text-xs text-muted-foreground truncate">{COLLEGE_NAME}</p>
+          </div>
         </div>
 
         <div className="flex items-center gap-1">

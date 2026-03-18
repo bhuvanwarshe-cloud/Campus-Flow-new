@@ -9,6 +9,10 @@ export const config = {
   port: process.env.PORT || 5100,
   nodeEnv: process.env.NODE_ENV || "development",
   jwtSecret: process.env.JWT_SECRET || "dev-secret-key",
+  emailUser: process.env.EMAIL_USER,
+  emailPass: process.env.EMAIL_PASS,
+  appUrl: process.env.APP_URL || "http://localhost:5173",
+  frontendUrl: process.env.FRONTEND_URL || process.env.APP_URL || "http://localhost:5173",
 };
 
 // Validate required environment variables
@@ -21,5 +25,12 @@ requiredEnvVars.forEach((envVar) => {
     );
   }
 });
+
+// Warn if Gmail credentials are missing
+if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+  console.warn(
+    "⚠️  Warning: EMAIL_USER or EMAIL_PASS is not set. Email invitations will fail."
+  );
+}
 
 export default config;

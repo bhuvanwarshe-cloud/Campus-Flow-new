@@ -28,6 +28,16 @@ interface Student {
     avg_marks: number | null;
 }
 
+interface RoleRequest {
+    id: string;
+    first_name: string;
+    last_name: string;
+    email: string;
+    class_name: string;
+    created_at: string;
+    metadata?: any;
+}
+
 interface Pagination {
     page: number;
     limit: number;
@@ -64,6 +74,7 @@ export default function TeacherStudents() {
 
     // Data state
     const [students, setStudents] = useState<Student[]>([]);
+    const [requests, setRequests] = useState<RoleRequest[]>([]);
     const [pagination, setPagination] = useState<Pagination>({ page: 1, limit: 20, total: 0, totalPages: 1 });
     const [classes, setClasses] = useState<{ id: string; name: string }[]>([]);
 
@@ -77,6 +88,8 @@ export default function TeacherStudents() {
 
     // UI state
     const [loading, setLoading] = useState(false);
+    const [loadingRequests, setLoadingRequests] = useState(false);
+    const [actioningId, setActioningId] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [refreshKey, setRefreshKey] = useState(0);
 
@@ -144,6 +157,36 @@ export default function TeacherStudents() {
             onClick={() => toggleSort(col)}
         />
     );
+
+    // ── Fetch Requests ───────────────────────────────────────────────────────
+    const fetchRequests = useCallback(async () => {
+        setLoadingRequests(true);
+        try {
+            const res = await api.get("/api/teacher/student-requests");
+            setRequests(res.data.data || []);
+        } catch (err) {
+            console.error("Failed to load requests", err);
+        } finally {
+            setLoadingRequests(false);
+        }
+    }, []);
+
+    useEffect(() => { fetchRequests(); }, [fetchRequests]);
+
+    const handleAction = async (id: string, action: "approve" | "reject") => {
+        setActioningId(id);
+        try {
+            await api.patch(`/api/teacher/student-requests/${id}/${action}`, action === "reject" ? { reason: "Teacher rejected request." } : {});
+            setRequests(r => r.filter(req => req.id !== id));
+            if (action === "approve") {
+                fetchStudents();
+            }
+        } catch (err: any) {
+            setError(err?.response?.data?.message || `Failed to ${action} request.`);
+        } finally {
+            setActioningId(null);
+        }
+    };
 
     return (
         <CampusShell
@@ -231,6 +274,48 @@ export default function TeacherStudents() {
                         <AlertCircle className="h-4 w-4 shrink-0" />
                         <span className="text-sm">{typeof error === "string" ? error : "An error occurred"}</span>
                     </div>
+                )}
+
+                {/* ── Pending Requests ── */}
+                {(requests.length > 0 || loadingRequests) && (
+                    <Card className="border-cyan-500/50 shadow-md">
+                        <CardHeader className="pb-3 border-b bg-muted/20">
+                            <CardTitle className="text-base text-cyan-600 dark:text-cyan-400 flex items-center justify-between">
+                                Class Join Requests
+                                {loadingRequests && <RefreshCw className="h-4 w-4 animate-spin disabled" />}
+                            </CardTitle>
+                            <CardDescription>
+                                Students requesting to join your assigned classes
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="p-0">
+                            <ul className="divide-y">
+                                {requests.map(req => (
+                                    <li key={req.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between hover:bg-muted/10 gap-3">
+                                        <div>
+                                            <div className="font-semibold text-sm flex items-center gap-2">
+                                                <span>{req.first_name || ""} {req.last_name || ""}</span>
+                                                <Badge className="text-xs" variant="outline">
+                                                    {req.class_name || "Unknown Class"}
+                                                </Badge>
+                                            </div>
+                                            <p className="text-xs text-muted-foreground mt-1">{req.email} • Requested {new Date(req.created_at).toLocaleDateString()}</p>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <Button size="sm" variant="outline" className="h-8 border-red-500 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+                                                onClick={() => handleAction(req.id, "reject")} disabled={!!actioningId}>
+                                                Reject
+                                            </Button>
+                                            <Button size="sm" className="h-8 bg-cyan-600 hover:bg-cyan-700 text-white"
+                                                onClick={() => handleAction(req.id, "approve")} disabled={!!actioningId}>
+                                                Approve
+                                            </Button>
+                                        </div>
+                                    </li>
+                                ))}
+                            </ul>
+                        </CardContent>
+                    </Card>
                 )}
 
                 {/* ── Table ── */}

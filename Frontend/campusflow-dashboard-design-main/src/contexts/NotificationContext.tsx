@@ -46,16 +46,16 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         } finally {
             setLoading(false);
         }
-    }, [user]);
+    }, [user?.id]);
 
     useEffect(() => {
-        if (user) {
+        if (user?.id) {
             fetchNotifications();
         } else {
             setNotifications([]);
             setUnreadCount(0);
         }
-    }, [user, fetchNotifications]);
+    }, [user?.id, fetchNotifications]);
 
     // Real-time listener for new notifications
     useRealtime({

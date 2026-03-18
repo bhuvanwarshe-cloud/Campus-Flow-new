@@ -14,7 +14,10 @@ import AuthCallback from "./pages/AuthCallback";
 import Dashboard from "./pages/Dashboard";
 import ProfileComplete from "./pages/ProfileComplete";
 import ProfileView from "./pages/ProfileView";
+import TeacherInviteAccept from "./pages/TeacherInviteAccept";
+import PendingApproval from "./pages/PendingApproval";
 import AdminUsers from "./pages/AdminUsers";
+import AdminClasses from "./pages/AdminClasses";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import TeacherClasses from "./pages/TeacherClasses";
 import TeacherClassDetails from "./pages/TeacherClassDetails";
@@ -48,6 +51,9 @@ const App = () => (
                   <Route path="/signup" element={<Signup />} />
                   <Route path="/auth/callback" element={<AuthCallback />} />
 
+                  {/* Public routes for invites */}
+                  <Route path="/teacher-invite" element={<TeacherInviteAccept />} />
+
                   {/* Protected routes */}
                   <Route
                     path="/dashboard"
@@ -70,6 +76,14 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AdminUsers />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/admin/classes"
+                    element={
+                      <ProtectedRoute>
+                        <AdminClasses />
                       </ProtectedRoute>
                     }
                   />
@@ -198,6 +212,14 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <ProfileView />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/pending-approval"
+                    element={
+                      <ProtectedRoute>
+                        <PendingApproval />
                       </ProtectedRoute>
                     }
                   />
